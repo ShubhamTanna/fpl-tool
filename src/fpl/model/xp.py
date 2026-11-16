@@ -222,13 +222,22 @@ def availability(players: pd.DataFrame, events: pd.DataFrame, gws: list[int]) ->
 
 def project(tables: dict, as_of_gw: int | None = None, horizon: int = 8,
             use_availability: bool = True, dials: Dials = DIALS, scoring: dict | None = None,
-            dc_threshold: dict | None = None) -> tuple[pd.DataFrame, dict]:
+            dc_threshold: dict | None = None, boosts: list[dict] | None = None) -> tuple[pd.DataFrame, dict]:
     """xP for every player for the `horizon` gameweeks after `as_of_gw`.
 
     Only matches up to and including `as_of_gw` are used, so passing an earlier
     gameweek gives an honest backtest. Returns (one row per player per GW, team ratings).
     `scoring` and `dc_threshold` default to this season's rules; the backtest passes
     the rules of the season it is replaying.
+
+    boosts: Shubham's manual overrides, each {"player_id", "type", "value", "start_gw", "end_gw"}.
+      type "output"  multiplies the player's goal and assist points by `value`
+      type "minutes" replaces his chance of starting with `value` (0 to 1)
+    A boost applies to gameweeks start_gw..end_gw. Boosted rows are marked in the `boosted` column.
+
+    Besides xP and its parts, each row carries the inputs behind them: p_start_used, xmins,
+    att_mult (fixture multiplier on goals and assists), p_cs, p_dc, team_xg, opp_xg, and the
+    player's blended per-90 rates.
     """
     d = dials
     players, fixtures, events = tables["players"], tables["fixtures"], tables["events"]
@@ -272,6 +281,16 @@ def project(tables: dict, as_of_gw: int | None = None, horizon: int = 8,
     else:
         df["avail"] = 1.0
 
+    df["out_mult"], df["boosted"] = 1.0, False
+    for b in boosts or []:
+        hit = (df.player_id == b["player_id"]) & df.gw.between(b["start_gw"], b["end_gw"])
+        if b["type"] == "minutes":
+            df.loc[hit, "p_start"] = float(b["value"])
+            df.loc[hit, "p_sub"] = np.minimum(df.loc[hit, "p_sub"], 1 - float(b["value"]))
+        elif b["type"] == "output":
+            df.loc[hit, "out_mult"] *= float(b["value"])
+        df.loc[hit, "boosted"] = True
+
     pos = df.position
     a_start = df.avail * df.p_start
     share = df.min_start.clip(upper=90) / 90          # share of the match a starter plays
@@ -280,8 +299,8 @@ def project(tables: dict, as_of_gw: int | None = None, horizon: int = 8,
 
     df["xp_app"] = df.avail * (df.p_start * (s["short_play"] + df.p60 * (s["long_play"] - s["short_play"]))
                                + df.p_sub * s["short_play"])
-    df["xp_goals"] = df.expected_goals_p90 * df.att_mult * g_ratio * n90 * pos.map(s["goals_scored"])
-    df["xp_assists"] = df.expected_assists_p90 * df.att_mult * a_ratio * n90 * s["assists"]
+    df["xp_goals"] = df.expected_goals_p90 * df.att_mult * g_ratio * n90 * pos.map(s["goals_scored"]) * df.out_mult
+    df["xp_assists"] = df.expected_assists_p90 * df.att_mult * a_ratio * n90 * s["assists"] * df.out_mult
     lam_pts = df.lam_against * (conceded_ratio(hist, seasons, d.ratio_prev_weight) if d.conceded_ratio else 1.0)
     df["p_cs"] = np.exp(-lam_pts * share)
     df["xp_cs"] = a_start * df.p60 * df.p_cs * pos.map(s["clean_sheets"])
@@ -311,11 +330,18 @@ def project(tables: dict, as_of_gw: int | None = None, horizon: int = 8,
     # One row per player per GW: doubles sum both fixtures, blanks get 0.
     agg = df.groupby(["player_id", "gw"]).agg(
         opp=("opp", " + ".join), n_fixtures=("opp", "size"), xmins=("xmins", "sum"),
+        p_start_used=("p_start", "mean"), avail=("avail", "mean"), att_mult=("att_mult", "mean"),
+        p_cs=("p_cs", "mean"), p_dc=("p_dc", "mean"), team_xg=("lam_for", "sum"), opp_xg=("lam_against", "sum"),
+        boosted=("boosted", "max"),
         **{c: (c, "sum") for c in parts}, xp=("xp", "sum")).reset_index()
     grid = pd.MultiIndex.from_product([players.player_id, gws], names=["player_id", "gw"]).to_frame(index=False)
     out = grid.merge(agg, on=["player_id", "gw"], how="left")
     out["opp"] = out.opp.fillna("-")
+    out["boosted"] = out.boosted.fillna(False).astype(bool)
     out = out.fillna(0.0)
     out["n_fixtures"] = out.n_fixtures.astype(int)
-    info = per_player[["player_id", "web_name", "position", "team", "now_cost", "p_start"]]
+    rates = {"expected_goals_p90": "xg_p90", "expected_assists_p90": "xa_p90",
+             "defensive_contribution_p90": "dc_p90", "saves_p90": "saves_p90", "bonus_p90": "bonus_p90"}
+    info = per_player[["player_id", "web_name", "position", "team", "now_cost", "p_start", "p_sub",
+                       "min_start", "p60", *rates]].rename(columns=rates)
     return info.merge(out, on="player_id"), ratings

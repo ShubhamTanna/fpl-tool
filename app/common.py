@@ -52,8 +52,18 @@ def rules():
 
 
 def proj() -> pd.DataFrame:
-    """The projections every page uses."""
-    return table("projections")
+    """The projections every page uses: built live from the data tables, with boosts applied."""
+    return _proj(data_stamp())
+
+
+@st.cache_data(show_spinner=False)
+def _proj(stamp: float) -> pd.DataFrame:
+    from fpl.model.xp import project
+    from fpl.user import boosts as bo
+    from fpl.user import store
+    out, _ = project({n: table(n) for n in ("teams", "players", "fixtures", "events", "player_gw", "player_seasons")},
+                     boosts=bo.for_model(store.load("boosts", [])))
+    return out
 
 
 def gameweeks() -> list[int]:
@@ -111,7 +121,9 @@ def deadline_text() -> str:
 
 def data_stamp() -> float:
     """Changes whenever the data or projections on disk change. Used as a cache key."""
-    return max((P / f"{n}.parquet").stat().st_mtime for n in ("players", "projections", "player_gw"))
+    files = [P / f"{n}.parquet" for n in ("players", "projections", "player_gw")]
+    files.append(ROOT / "data" / "user" / "boosts.json")
+    return max(f.stat().st_mtime for f in files if f.exists())
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
