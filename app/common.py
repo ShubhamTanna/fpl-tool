@@ -264,3 +264,18 @@ def auto_pick(squad: tuple, gw: int, stamp: float) -> dict | None:
         pts = actual_points(stamp)[gw].reindex(res["xi"]).fillna(0)
         res["actual"] = int(pts.sum() + pts[res["captain"]])
     return res
+
+
+@st.cache_data(show_spinner=False)
+def real_squad(gw: int) -> tuple:
+    """The 15 players the real team held in a finished gameweek (from FPL, cached for good)."""
+    from fpl.ingest.team import picks_history
+    return tuple(x["element"] for x in picks_history(team_id(), [gw])[gw]["picks"])
+
+
+def real_like_for_like(gw: int, stamp: float) -> int | None:
+    """The real team's score for a finished gameweek by the drafts' method: the squad it held,
+    auto-picked XI from the projection made beforehand, captain doubled, no automatic
+    substitutions, no chips, no hits."""
+    res = auto_pick(real_squad(gw), gw, stamp)
+    return None if res is None else res["actual"]

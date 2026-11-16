@@ -18,11 +18,18 @@ from ..optimize.rules import Rules
 
 
 def new_draft(drafts: list[dict], name: str, start_gw: int, note: str, squad: list[int], prices: dict,
-              budget: int, source: str) -> dict:
-    return {"id": 1 + max((d["id"] for d in drafts), default=0), "name": name, "start_gw": int(start_gw),
+              budget: int, source: str, created_gw: int | None = None) -> dict:
+    """created_gw: the next gameweek on the day the draft was made (see uses_hindsight)."""
+    return {"created_gw": int(created_gw if created_gw is not None else start_gw), "id": 1 + max((d["id"] for d in drafts), default=0), "name": name, "start_gw": int(start_gw),
             "note": note, "source": source, "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "budget": int(budget), "prices": {str(i): int(prices[i]) for i in squad},
             "squads": {str(int(start_gw)): [int(i) for i in squad]}}
+
+
+def uses_hindsight(draft: dict) -> bool:
+    """True if the draft was given a start gameweek that had already been played when it was made:
+    its squad was chosen knowing those results, so its score for them is not a fair test."""
+    return draft["start_gw"] < draft.get("created_gw", draft["start_gw"])
 
 
 def squad_at(draft: dict, gw: int) -> list[int]:

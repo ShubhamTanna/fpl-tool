@@ -111,3 +111,29 @@ def compare(ids: list[int], players: pd.DataFrame, proj: pd.DataFrame, names: pd
         "Chance of starting": first.p_start_used.values, f"xP GW{gws[0]}": xp[gws[0]].values,
         f"xP GW{gws[0]}-{gws[min(4, len(gws) - 1)]}": xp[gws[:5]].sum(axis=1).values,
         f"xP GW{gws[0]}-{gws[-1]}": xp.sum(axis=1).values})
+
+
+PCT_MIN_MINUTES = 270      # players with fewer minutes are left out of the comparison pool
+PCT_METRICS = {"xG per 90": "expected_goals", "xA per 90": "expected_assists",
+               "xGI per 90": "expected_goal_involvements", "Def. actions per 90": "defensive_contribution",
+               "Bonus per 90": "bonus"}
+
+
+def percentiles(ids: list[int], players: pd.DataFrame, player_gw: pd.DataFrame) -> pd.DataFrame:
+    """Where each player ranks among players of his position with PCT_MIN_MINUTES+ minutes.
+    100 = best in the position. Minutes share = his minutes / the minutes his club has played."""
+    p = players.set_index("player_id")
+    club_mins = player_gw.groupby("team_id").fixture_id.nunique() * 90
+    stats = pd.DataFrame({k: p[c] / p.minutes * 90 for k, c in PCT_METRICS.items()})
+    stats["Minutes share"] = p.minutes / p.team_id.map(club_mins)
+    pool = p.minutes >= PCT_MIN_MINUTES
+    rows = []
+    for i in ids:
+        peers = stats[pool & (p.position == p.position[i])]
+        for m in stats.columns:
+            v = stats.loc[i, m]
+            rows.append({"player_id": i, "metric": m, "value": v,
+                         "percentile": (float(((peers[m] < v).mean() + (peers[m] == v).mean() / 2) * 100)
+                                        if p.minutes[i] > 0 else float("nan")),   # ties share the middle rank
+                         "peers": len(peers)})
+    return pd.DataFrame(rows)

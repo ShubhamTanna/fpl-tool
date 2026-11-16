@@ -56,6 +56,13 @@ def test_swap_rejects_duplicates_and_strangers():
     assert drafts.swap(_draft(), 16, 17, PLAYERS, RULES, 11)[1]
 
 
+def test_hindsight_label():
+    assert not drafts.uses_hindsight(_draft())
+    past = drafts.new_draft([], "past", 8, "", SQUAD, {i: 50 for i in SQUAD}, 760, "copy", created_gw=11)
+    assert drafts.uses_hindsight(past)
+    assert not drafts.uses_hindsight(drafts.new_draft([], "now", 11, "", SQUAD, {i: 50 for i in SQUAD}, 760, "copy", created_gw=11))
+
+
 def test_store_round_trip_and_export(tmp_path):
     d = _draft()
     store.save("drafts", [d], tmp_path)

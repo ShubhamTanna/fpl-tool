@@ -1,8 +1,10 @@
 """Drafts: saved squads kept apart from the real team, and how they compare with it."""
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 import common as c
+import viz
 from fpl.user import drafts as dr
 from fpl.user import store
 
@@ -43,7 +45,8 @@ with st.expander("New draft", expanded=not all_drafts):
                 if errs:
                     st.error("; ".join(errs))
                 else:
-                    all_drafts.append(dr.new_draft(all_drafts, name.strip(), start, note, squad, prices, budget, source))
+                    all_drafts.append(dr.new_draft(all_drafts, name.strip(), start, note, squad, prices, budget, source,
+                                                   created_gw=c.next_gw()))
                     store.save("drafts", all_drafts)
                     st.rerun()
 
@@ -52,7 +55,14 @@ if not all_drafts:
     st.stop()
 
 by_id = {d["id"]: d for d in all_drafts}
-pick = st.selectbox("Draft", list(by_id), format_func=lambda i: f"{by_id[i]['name']} (from GW{by_id[i]['start_gw']})")
+
+
+def title(d: dict) -> str:
+    """Draft name, marked wherever its score appears if the start gameweek was already played."""
+    return d["name"] + (" (uses hindsight)" if dr.uses_hindsight(d) else "")
+
+
+pick = st.selectbox("Draft", list(by_id), format_func=lambda i: f"{title(by_id[i])}, from GW{by_id[i]['start_gw']}")
 draft = by_id[pick]
 squad = dr.current_squad(draft)
 
@@ -76,6 +86,18 @@ if draft["note"]:
 look = max(c.next_gw(), draft["start_gw"])
 res = c.auto_pick(tuple(dr.squad_at(draft, look)), look, stamp) if look in c.gameweeks() else None
 if res:
+    a, b = st.columns(2)
+    with a:
+        viz.chart(viz.pitch(c.cards(res, look), f"{title(draft)}: GW{look}, {res['xp']:.1f} xP"), c.PITCH_CAPTION,
+                  height=540, key="pitch_draft")
+    with b:
+        mine_now = c.auto_pick(tuple(c.my_team(stamp)["squad"]), look, stamp) if look == c.next_gw() else None
+        if mine_now:
+            viz.chart(viz.pitch(c.cards(mine_now, look), f"My team: GW{look}, {mine_now['xp']:.1f} xP"),
+                      "Your real squad with the same auto-pick, to compare card by card with the draft.",
+                      height=540, key="pitch_mine")
+        else:
+            st.info("The side-by-side pitch appears for drafts that start by the next gameweek.")
     role = {res["captain"]: "Captain", res["vice"]: "Vice"}
     ids = res["xi"] + res["bench"]
     extra = {"Slot": ["XI"] * len(res["xi"]) + [f"Bench {k}" for k in range(1, len(res["bench"]) + 1)],
@@ -125,41 +147,75 @@ with st.expander("Rename, edit note or delete"):
         st.rerun()
 
 st.subheader("Compare with my team")
-chosen = st.multiselect("Drafts to compare", list(by_id), default=[pick], format_func=lambda i: by_id[i]["name"])
+chosen = st.multiselect("Drafts to compare", list(by_id), default=[pick], format_func=lambda i: title(by_id[i]))
 if chosen:
     team, done = c.my_team(stamp), c.finished_gws()
     first = min(by_id[i]["start_gw"] for i in chosen)
-    played = [g for g in done if g >= first]
-    ahead = [g for g in c.gameweeks()]
+    played, ahead = [g for g in done if g >= first], c.gameweeks()
+    gws_all = played + ahead
 
-    def draft_score(d: dict, gw: int, key: str):
+    def draft_score(d: dict, gw: int):
         if gw < d["start_gw"]:
             return None
         res = c.auto_pick(tuple(dr.squad_at(d, gw)), gw, stamp)
-        return None if res is None else res[key]
+        return None if res is None else (res["actual"] if gw in done else res["xp"])
 
-    def table_for(gws: list[int], mine: list, key: str) -> pd.DataFrame:
-        out = pd.DataFrame({"GW": gws, "My team": mine})
-        for i in chosen:
-            d = by_id[i]
-            vals = pd.Series([draft_score(d, g, key) for g in gws], dtype="float")
-            out[d["name"]] = vals.round(1)
-            out[f"{d['name']} - mine"] = (vals - out["My team"]).round(1)
-            out[f"{d['name']} running"] = (vals - out["My team"]).cumsum().round(1)
-        return out
+    official = [team["gw_points"].get(g, 0) - team["gw_hits"].get(g, 0) for g in played]
+    same = [c.real_like_for_like(g, stamp) for g in played]
+    mine_ahead = [c.auto_pick(tuple(team["squad"]), g, stamp)["xp"] for g in ahead]
+    out = pd.DataFrame({"GW": gws_all, "Status": ["played"] * len(played) + ["projected"] * len(ahead),
+                        "My team, official": pd.Series(official + [float("nan")] * len(ahead), dtype="float"),
+                        "My team, same method": same + mine_ahead})
+    base = pd.Series(same + mine_ahead, dtype="float")
+    scores = {}
+    for i in chosen:
+        d = by_id[i]
+        scores[i] = pd.Series([draft_score(d, g) for g in gws_all], dtype="float")
+        out[title(d)] = scores[i]
+        out[f"{title(d)} - mine"] = scores[i] - base
+        out[f"{title(d)} running"] = (scores[i] - base).cumsum()
 
-    if played:
-        st.markdown("**Played: actual points**")
-        mine = [team["gw_points"].get(g, 0) - team["gw_hits"].get(g, 0) for g in played]
-        c.show(table_for(played, mine, "actual"))
-        st.caption("My team = official FPL score minus transfer hits (it includes automatic substitutions and "
-                   "chips). A draft's score is its auto-picked XI with the captain doubled, chosen from the "
-                   "projection made before that gameweek, with no automatic substitutions. 'running' is the "
-                   "cumulative difference since the draft's start gameweek.")
-    st.markdown("**Ahead: projected points**")
-    mine = [c.auto_pick(tuple(team["squad"]), g, stamp)["xp"] for g in ahead]
-    c.show(table_for(ahead, [round(x, 1) for x in mine], "xp"))
-    st.caption("Both sides are the auto-picked XI plus captain from today's projections, with no further "
-               "transfers. My team includes transfers already made for the next gameweek.")
+    palette = [viz.ACCENT, "#A78BFA", viz.WARN, "#F472B6", "#4C9AFF"]
+    x = [f"GW{g}" for g in gws_all]
+    n = len(played)
+    fig = go.Figure()
+
+    def add_line(name: str, vals: pd.Series, colour: str, width: float = 2.5) -> None:
+        """Cumulative points: solid for played gameweeks, dashed for projected ones."""
+        cum = vals.cumsum()
+        if n:
+            fig.add_scatter(x=x[:n], y=cum[:n].round(1), name=name, mode="lines+markers", legendgroup=name,
+                            line=dict(color=colour, width=width))
+        fig.add_scatter(x=x[max(n - 1, 0):], y=cum[max(n - 1, 0):].round(1), name=name + " (projected)",
+                        mode="lines+markers", legendgroup=name, showlegend=not n,
+                        line=dict(color=colour, width=width, dash="dash"))
+
+    add_line("My team, same method", base, viz.TEXT)
+    if n:
+        fig.add_scatter(x=x[:n], y=pd.Series(official).cumsum(), name="My team, official", mode="lines+markers",
+                        line=dict(color=viz.MUTED, width=1.5, dash="dot"))
+    for k, i in enumerate(chosen):
+        add_line(title(by_id[i]), scores[i], palette[k % len(palette)])
+    fig.update_layout(title=f"Cumulative points from GW{gws_all[0]}", yaxis_title="Points")
+    viz.chart(fig, "Solid = points actually scored, dashed = projected. A draft is ahead of your team where its "
+                   "line is above the white one. The dotted grey line is your official FPL score, which also "
+                   "counts automatic substitutions, chips and hits.", height=380, key="cum")
+
+    fig = go.Figure()
+    for k, i in enumerate(chosen):
+        diff = (scores[i] - base).round(1)
+        fig.add_bar(x=x, y=diff, name=title(by_id[i]), marker_color=palette[k % len(palette)],
+                    marker_pattern_shape=[""] * n + ["/"] * len(ahead))
+    fig.add_hline(y=0, line_color=viz.MUTED)
+    fig.update_layout(barmode="group", title="Draft minus my team, per gameweek", yaxis_title="Points")
+    viz.chart(fig, "Above zero = the draft beat your team that week (same scoring method on both sides). "
+                   "Hatched bars are projections, not results.", height=300, key="diff")
+
+    c.show(out, decimals=1)
+    st.caption("Like for like: 'My team, same method' and every draft are scored the same way: the squad held "
+               "that gameweek, the optimizer's XI chosen from the projection made beforehand, captain doubled, "
+               "no automatic substitutions, no chips, no hits. 'My team, official' is FPL's score minus hits. "
+               "Differences and running totals use the same-method score. A draft marked 'uses hindsight' was "
+               "given a start gameweek that had already been played, so its past score is not a fair test.")
 
 st.download_button("Export drafts and boosts (zip)", store.export_zip(), "fpl-user-data.zip", "application/zip")
