@@ -178,4 +178,4 @@ He reports doing well above average in FPL. These methods have not been tested o
 - Shubham's FPL team ID
 - Odds API key (v2)
 - Understat merge (Section 1) deferred: understat.com was offline on 16 Nov 2026 ("We will come back soon"). When it is back, find the current data endpoint, build the loader and report the FPL id match rate.
-- Current defensive-contribution thresholds
+- Defensive-contribution thresholds: DEF 10 CBIT and MID 12 CBIRT confirmed from GW1-10 data (16 Nov 2026). FWD 12 is still an assumption: the data only narrows it to 11-16.

@@ -4,8 +4,10 @@ Tables
   teams      one row per club
   players    one row per player (current snapshot)
   fixtures   one row per fixture, past and upcoming
+  events     one row per gameweek (deadline, finished flag)
   player_gw  one row per player per fixture of his club this season
              (minutes = 0 rows are kept: the minutes model needs them)
+  player_seasons  one row per player per past season (season totals)
 """
 import pandas as pd
 
@@ -55,10 +57,21 @@ def build_fixtures(raw: list) -> pd.DataFrame:
     return df
 
 
-def build_player_gw(player_ids: list[int], fixtures: pd.DataFrame, log_every: int = 50) -> pd.DataFrame:
-    rows = []
+def build_events(boot: dict) -> pd.DataFrame:
+    cols = ["id", "deadline_time", "finished", "is_current", "is_next"]
+    df = pd.DataFrame(boot["events"])[cols].rename(columns={"id": "gw"})
+    df["deadline_time"] = pd.to_datetime(df["deadline_time"], utc=True)
+    return df
+
+
+def build_player_history(player_ids: list[int], fixtures: pd.DataFrame,
+                         log_every: int = 50) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Returns (player_gw, player_seasons) from the element-summary endpoint."""
+    rows, past = [], []
     for i, pid in enumerate(player_ids, 1):
-        rows.extend(fpl_api.element_summary(pid)["history"])
+        summary = fpl_api.element_summary(pid)
+        rows.extend(summary["history"])
+        past.extend({"player_id": pid, **h} for h in summary["history_past"])
         if i % log_every == 0:
             print(f"  element-summary {i}/{len(player_ids)}", flush=True)
     df = pd.DataFrame(rows).rename(
@@ -70,7 +83,10 @@ def build_player_gw(player_ids: list[int], fixtures: pd.DataFrame, log_every: in
     fx = fixtures.set_index("fixture_id")
     home, away = df["fixture_id"].map(fx["team_h"]), df["fixture_id"].map(fx["team_a"])
     df["team_id"] = home.where(df["was_home"], away)
-    return df
+
+    seasons = pd.DataFrame(past)
+    seasons[GW_FLOAT_COLS] = seasons[GW_FLOAT_COLS].apply(pd.to_numeric, errors="coerce")
+    return df, seasons
 
 
 def build_all() -> dict[str, pd.DataFrame]:
@@ -78,8 +94,9 @@ def build_all() -> dict[str, pd.DataFrame]:
     teams = build_teams(boot)
     players = build_players(boot, teams)
     fixtures = build_fixtures(fpl_api.fixtures())
-    player_gw = build_player_gw(players["player_id"].tolist(), fixtures)
-    tables = {"teams": teams, "players": players, "fixtures": fixtures, "player_gw": player_gw}
+    player_gw, player_seasons = build_player_history(players["player_id"].tolist(), fixtures)
+    tables = {"teams": teams, "players": players, "fixtures": fixtures, "events": build_events(boot),
+              "player_gw": player_gw, "player_seasons": player_seasons}
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     for name, df in tables.items():
         df.to_parquet(PROCESSED_DIR / f"{name}.parquet", index=False)
