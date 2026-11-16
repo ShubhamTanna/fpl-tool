@@ -177,5 +177,5 @@ He reports doing well above average in FPL. These methods have not been tested o
 ## Open items
 - Shubham's FPL team ID
 - Odds API key (v2)
-- Current Understat data endpoint
+- Understat merge (Section 1) deferred: understat.com was offline on 16 Nov 2026 ("We will come back soon"). When it is back, find the current data endpoint, build the loader and report the FPL id match rate.
 - Current defensive-contribution thresholds
