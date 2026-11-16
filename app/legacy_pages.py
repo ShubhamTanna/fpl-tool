@@ -6,31 +6,6 @@ from common import PARTS, POSITIONS, gameweeks, player_rows, proj, rules, run_sq
 from fpl.insights import signals as sig_rules
 
 
-def page_squad_builder() -> None:
-    st.title("Squad Builder")
-    st.caption("The best 15 from scratch under the game rules, for the gameweeks you choose.")
-    r = rules()
-    c1, c2 = st.columns(2)
-    horizon = c1.slider("Gameweeks to optimise", 1, len(gameweeks()), 5)
-    budget = c2.number_input("Budget (m)", 80.0, 120.0, r.budget / 10, 0.5)
-    with st.spinner("Solving..."):
-        res, errs = run_squad(horizon, round(budget * 10))
-    gws = [g["gw"] for g in res["gws"]]
-    first = res["gws"][0]
-    m = st.columns(3)
-    m[0].metric("Squad cost", f"{res['cost'] / 10:.1f}m")
-    m[1].metric(f"XI + captain xP, GW{gws[0]}", f"{first['xp']:.1f}")
-    m[2].metric("Rule check", "Pass" if not errs else "FAIL")
-    if errs:
-        st.error("; ".join(errs))
-    role = {first["captain"]: "Captain", first["vice"]: "Vice"}
-    ids = first["xi"] + first["bench"]
-    show(player_rows(ids, gws, {
-        "Slot": ["XI"] * len(first["xi"]) + [f"Bench {k}" for k in range(1, len(first["bench"]) + 1)],
-        "Role": [role.get(i, "") for i in ids]}), height=563)
-    st.caption(f"XI, bench and captain shown are for GW{gws[0]}. Later gameweeks count 10% less each.")
-
-
 def page_projections() -> None:
     st.title("Projections")
     st.caption("Expected points (xP) per player, built from minutes, team strength, xG/xA, clean sheets, "

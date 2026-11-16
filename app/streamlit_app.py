@@ -12,7 +12,7 @@ common.apply_theme()
 
 pages = [
     st.Page("app_pages/my_team.py", title="My team", url_path="my-team", default=True),
-    st.Page(old.page_squad_builder, title="Squad builder", url_path="squad-builder"),
+    st.Page("app_pages/drafts.py", title="Drafts", url_path="drafts"),
     st.Page(old.page_projections, title="Projections", url_path="projections"),
     st.Page(old.page_template, title="Template", url_path="template"),
     st.Page(old.page_signals, title="Signals", url_path="signals"),

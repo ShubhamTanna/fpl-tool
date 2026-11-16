@@ -186,3 +186,50 @@ def ticker_grid(value: str, best_high: bool, first: list[str] = ()):
     text.insert(0, "Total", vals.sum(axis=1).round(2))
     text.insert(0, "Mine", ["yes" if t in first else "" for t in text.index])
     return text.style.apply(colour, axis=None, subset=list(vals.columns)).format({"Total": "{:.2f}"})
+
+
+# ---------------------------------------------------------------- past gameweeks and auto-picks
+from fpl import pipeline  # noqa: E402
+from fpl.model.xp import project  # noqa: E402
+from fpl.optimize.models import pick_team  # noqa: E402
+
+
+def tables() -> dict:
+    return {n: table(n) for n in pipeline.TABLES}
+
+
+def finished_gws() -> list[int]:
+    ev = table("events")
+    return sorted(int(g) for g in ev.loc[ev.finished, "gw"])
+
+
+@st.cache_data(show_spinner=False)
+def past_proj(gw: int, stamp: float) -> pd.DataFrame:
+    """xP for a finished gameweek as the model would have projected it beforehand: only matches
+    before `gw` are used. Injury flags of the time are not available, so none are applied."""
+    out, _ = project(tables(), as_of_gw=gw - 1, horizon=1, use_availability=False)
+    return out
+
+
+@st.cache_data(show_spinner=False)
+def actual_points(stamp: float) -> pd.DataFrame:
+    """Rows = players, columns = gameweeks, values = FPL points scored (0 if he had no match)."""
+    return table("player_gw").pivot_table(index="player_id", columns="gw", values="total_points",
+                                          aggfunc="sum", fill_value=0)
+
+
+@st.cache_data(show_spinner=False)
+def auto_pick(squad: tuple, gw: int, stamp: float) -> dict | None:
+    """Best XI, bench order and captain for `squad` in `gw`, chosen by the optimizer's pick_team.
+
+    For a finished gameweek the choice uses the projection made before it, and `actual` is what
+    that XI scored with the captain doubled (no automatic substitutions, no chips)."""
+    players, done = table("players"), gw in finished_gws()
+    if not set(squad) <= set(players.player_id):
+        return None                                   # a player has left the game
+    res = pick_team(list(squad), past_proj(gw, stamp) if done else proj(), players, rules(), gw)
+    res["actual"] = None
+    if done:
+        pts = actual_points(stamp)[gw].reindex(res["xi"]).fillna(0)
+        res["actual"] = int(pts.sum() + pts[res["captain"]])
+    return res
