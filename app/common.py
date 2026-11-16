@@ -134,9 +134,29 @@ def my_team(stamp: float) -> dict:
                      r.sell_fee, r.max_free_transfers)
 
 
+BOOST_MARK = " [boost]"
+
+
+def live_boosts() -> list[dict]:
+    from fpl.user import boosts as bo
+    from fpl.user import store
+    return bo.live(store.load("boosts", []), next_gw())
+
+
 def names() -> pd.Series:
-    """player_id -> display name."""
-    return table("players").set_index("player_id").web_name
+    """player_id -> display name. A player with a boost still in force is marked."""
+    out = table("players").set_index("player_id").web_name.copy()
+    for i in {b["player_id"] for b in live_boosts()}:
+        if i in out.index:
+            out[i] = out[i] + BOOST_MARK
+    return out
+
+
+@st.cache_data(show_spinner=False)
+def base_proj(stamp: float) -> pd.DataFrame:
+    """Projections with no boosts applied, for showing what a boost changes."""
+    out, _ = project(tables())
+    return out
 
 
 def labels() -> dict[int, str]:

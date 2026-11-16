@@ -6,33 +6,6 @@ from common import PARTS, POSITIONS, gameweeks, player_rows, proj, rules, run_sq
 from fpl.insights import signals as sig_rules
 
 
-def page_projections() -> None:
-    st.title("Projections")
-    st.caption("Expected points (xP) per player, built from minutes, team strength, xG/xA, clean sheets, "
-               "saves, defensive contribution, bonus and cards.")
-    proj_, gws = proj(), gameweeks()
-    c1, c2, c3, c4 = st.columns(4)
-    lo, hi = c1.select_slider("Gameweeks", gws, (gws[0], gws[0]))
-    pos = c2.multiselect("Position", POSITIONS, POSITIONS)
-    clubs = c3.multiselect("Club", sorted(proj_.team.unique()))
-    max_price = c4.number_input("Max price (m)", 3.5, 20.0, 20.0, 0.5)
-    d = proj_[proj_.gw.between(lo, hi) & proj_.position.isin(pos) & (proj_.now_cost <= max_price * 10)]
-    if clubs:
-        d = d[d.team.isin(clubs)]
-    agg = d.groupby(["player_id", "web_name", "position", "team", "now_cost"], as_index=False).agg(
-        opp=("opp", ", ".join), xmins=("xmins", "sum"), **{c: (c, "sum") for c in PARTS}, xp=("xp", "sum"))
-    agg["Price"] = agg.now_cost / 10
-    agg["xP per m"] = agg.xp / agg.Price
-    out = agg.sort_values("xp", ascending=False).rename(columns={
-        "web_name": "Player", "position": "Pos", "team": "Club", "opp": "Fixtures", "xmins": "xMins",
-        "xp": "xP", **PARTS})
-    cols = ["Player", "Pos", "Club", "Price", "Fixtures", "xMins", "xP", "xP per m"] + list(PARTS.values())
-    show(out[cols].round(2), height=600)
-    st.caption("Known weak spots: players back from injury are underrated, one big match can inflate a "
-               "defender's goal threat, and team ratings rest on few matches. Backtest results are on the "
-               "Model lab page.")
-
-
 def page_template() -> None:
     st.title("Template")
     picks, t = table("top_picks"), table("template")
