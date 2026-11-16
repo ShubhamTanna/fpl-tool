@@ -25,3 +25,12 @@ python scripts/build_template.py
 ```bash
 streamlit run app/streamlit_app.py
 ```
+
+## Backtest and tuning (Step 6)
+
+```
+python -c "import sys; sys.path.insert(0,'src'); from fpl.ingest.history import build_history; build_history()"
+python scripts/run_trials.py          # every tuning trial, writes data/processed/trial_log.csv
+python scripts/backtest.py            # before/after results for every season
+python scripts/backtest_threshold.py  # transfer-threshold simulation
+```

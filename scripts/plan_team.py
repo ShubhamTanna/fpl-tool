@@ -1,6 +1,6 @@
 """Section 3b/3c: transfer plan and weekly picks for a real team.
 
-Usage: python scripts/plan_team.py --team-id 123456 [--horizon 5] [--free-transfers N] [--bank 1.5]
+Usage: python scripts/plan_team.py --team-id 123456 [--horizon 5] [--free-transfers N] [--bank 1.5] [--min-gain 2]
 """
 import argparse
 import sys
@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from fpl.ingest.team import load_team  # noqa: E402
 from fpl.optimize.checker import check_plan  # noqa: E402
-from fpl.optimize.models import plan_transfers  # noqa: E402
+from fpl.optimize.models import MIN_GAIN, plan_transfers  # noqa: E402
 from fpl.optimize.rules import load_rules  # noqa: E402
 
 P = ROOT / "data" / "processed"
@@ -26,6 +26,8 @@ def main() -> None:
     ap.add_argument("--horizon", type=int, default=5, choices=range(1, 6))
     ap.add_argument("--free-transfers", type=int, default=None, help="override the derived count")
     ap.add_argument("--bank", type=float, default=None, help="override the bank, in millions")
+    ap.add_argument("--min-gain", type=float, default=MIN_GAIN,
+                    help="suggest a transfer only if it adds more than this many xP over the horizon")
     a = ap.parse_args()
 
     players, proj = pd.read_parquet(P / "players.parquet"), pd.read_parquet(P / "projections.parquet")
@@ -60,10 +62,11 @@ def main() -> None:
     print(sq.to_string(index=False))
 
     t0 = time.time()
-    plan = plan_transfers(team, proj, players, rules, gws)
+    plan = plan_transfers(team, proj, players, rules, gws, min_gain=a.min_gain)
     hold = plan_transfers(team, proj, players, rules, gws, allow_transfers=False)
     errs = check_plan(plan, team, players, rules) + check_plan(hold, team, players, rules)
-    print(f"\nSolved in {time.time() - t0:.1f}s   Constraint check: {'PASS' if not errs else errs}")
+    print(f"\nMinimum gain per transfer: {a.min_gain} xP")
+    print(f"Solved in {time.time() - t0:.1f}s   Constraint check: {'PASS' if not errs else errs}")
 
     print("\n== Plan")
     for g, h in zip(plan["gws"], hold["gws"]):

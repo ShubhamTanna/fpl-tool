@@ -161,6 +161,74 @@ Deploy on Streamlit Community Cloud from the GitHub repo. Shubham links it from 
 
 ---
 
+## Phase 2 (approved by Shubham, 16 Nov 2026)
+
+Sections 0-5 are built. Phase 2 replaces the remaining v1/v2 plan above where they conflict.
+
+### Direction change
+- This is a **personal tool for Shubham's own team only**. No public version, no deploy. Run locally with Streamlit.
+- Every screen is about his team: his squad, his drafts, candidates to bring in.
+- He wants detail, not abstraction: raw FPL (and later Understat) statistics visible in the interface, with the xP breakdown next to them.
+- He will not hand-tune the model dials. Dials change only through the backtest (Step 6).
+- His team ID is not recorded here. Two ids are in data/raw/entry (108672, 895045); ask him which is his.
+
+### Review findings (measured 16 Nov 2026, backtest of GW4-10, 4,672 player-gameweeks)
+- Totals are calibrated: 6,206 projected vs 6,394 actual points.
+- Clean sheets under-projected: 851 vs 1,066. Defensive contribution under-projected: 400 vs 514. Goals over-projected: 946 vs 864. Assists: 535 vs 495.
+- Goalkeepers who start are under-projected: 3.05 vs 3.78 per match.
+- Projections are too flat: for GW11 Palmer (9.8m) 3.77, E.Le Fee (5.7m) 4.88. The squad builder starts no midfielder above 6.7m and the planner captains a defender in GW12.
+- Edge over a naive baseline is small: correlation among players who played 0.31 vs 0.27 for points-per-game; the model's top 11 averaged 4.55 points vs 4.51.
+- The app's Projections caption hardcodes 0.60 / 0.37 (GW10 only). Remove hardcoded results from the UI.
+- Injured players with no return date recover 25 points of availability per GW (Saka projected 13.6 xP over GW11-18 while "unknown return date").
+- The transfer planner makes a transfer in 4 of 5 weeks for small gains. No lock, ban or transfer cap.
+- load_team reads the squad as of the last finished GW; transfers already made for the next GW are not applied.
+- No data refresh in the app; st.cache_data never expires. No tests/ folder.
+
+### Step 6 - Backtest harness, projection fixes, defender matchup (BUILD THIS NEXT)
+
+**6a. Historical data.** Load past seasons from GitHub `vaastav/Fantasy-Premier-League` (`data/<season>/gws/merged_gw.csv`). Checked 16 Nov 2026:
+- 2022-23, 2023-24, 2024-25, 2025-26 have per-GW xG and starts. 2021-22 and earlier do not: do not use them.
+- Only 2025-26 has defensive_contribution. Scoring rules differ by season (defensive-contribution points did not exist before 2025-26): score each season with its own rules, and test the DC part on 2025-26 and 2026-27 only.
+- Player ids change every season. Map across seasons with the `code` field, not `id`.
+
+**6b. Harness.** One function replays any past GW: project it using only data from before it, then compare with actual points. Report per season and overall:
+- mean absolute error per player
+- correlation among players who played
+- average actual points of the model's best XI (valid formation, with captain) vs the same from points-per-game
+- calibration by component (goals, assists, clean sheets, DC, bonus, saves) and by xP bucket
+Save results to data/processed/ so the app can show them.
+
+**6c. Tuning protocol (strict).**
+- Tune on 2022-23 to 2024-25. Hold out 2025-26: it is looked at only to accept or reject a change.
+- Change one dial at a time. Keep a change only if the hold-out season improves.
+- Log every trial (dial, old value, new value, tune result, hold-out result) to a table in the repo.
+- Never tune on 2026-27 data. It is the live check.
+
+**6d. Fixes to test through the harness, in this order.**
+1. Clean-sheet and goals-conceded bias (check team ratings from player-summed xG vs actual goals conceded; consider a conceded-goals conversion ratio like the one used for goals).
+2. Flatness: weight on last season (PRIOR_90S, PREV_SEASON_SHRINK), rate half-life.
+3. Goalkeeper under-projection (saves and bonus).
+4. Injuries with no return date: replace the +25 per GW timer with something tested or conservative.
+5. **Defender matchup (Shubham's signal):** for each club, how many defensive actions opposing DEF/MID/FWD record against it, relative to average. Use it as a fixture multiplier on the DC rate. Keep only if the DC calibration and hold-out error improve.
+6. Also test whether Poisson fits the DC count (it may be over-dispersed).
+
+**6e. Optimizer change (Shubham's rule: pick well, roll transfers).** Add a minimum-gain threshold: a transfer is suggested only if it adds more than X xP over the horizon. X is a visible setting, default chosen from the backtest.
+
+**Check for Step 6:** show before/after tables for tune seasons and hold-out, the trial log, and the GW11 top 10 per position before/after. Then stop.
+
+### Step 7 - Personal rebuild (outline only; do not start until Step 6 is approved)
+- My Team: plan with lock / ban / max-transfers / threshold controls; apply transfers already made this GW; refresh-data button; deadline in IST.
+- Drafts: unlimited saved draft teams, separate from the real team, each stored with its start GW. Show projected points forward and actual points once played, side by side with the real team.
+- Player page: full match-by-match FPL stats, xP breakdown, record vs upcoming opponents (display only), Understat shots when available.
+- Scout: each signal as a ranked list of candidates for his team.
+- Manual boosts: Shubham enters a multiplier for a player (eye test, new manager). Every boost is logged with date and reason and later scored against actual points.
+- Model lab: dials, trial log, backtest results.
+- Styling: plain, his site's colours and type through Streamlit theme config.
+
+### Step 8 - Understat signals (blocked: understat.com still offline at 18:30 IST, 16 Nov 2026)
+- Zone matchup (left / centre / right), long-shot matchup, team set-piece xG. Each must pass the harness before it enters xP.
+- Record vs a specific opponent and reverse fixture: display only unless the harness shows value (expected: none).
+
 ## Shubham's methods (encode as signals, test later)
 
 1. **Form x zone matchup (v2):** an in-form player facing a team that is weak in his zone (e.g. a right winger vs a weak left side). Needs:
@@ -175,7 +243,7 @@ He reports doing well above average in FPL. These methods have not been tested o
 ---
 
 ## Open items
-- Shubham's FPL team ID
+- Shubham's FPL team ID (ask which of 108672 / 895045 is his)
 - Odds API key (v2)
 - Understat merge (Section 1) deferred: understat.com was offline on 16 Nov 2026 ("We will come back soon"). When it is back, find the current data endpoint, build the loader and report the FPL id match rate.
 - Defensive-contribution thresholds: DEF 10 CBIT and MID 12 CBIRT confirmed from GW1-10 data (16 Nov 2026). FWD 12 is still an assumption: the data only narrows it to 11-16.

@@ -5,16 +5,13 @@ Model: expected goals for team i against team j
 attack > 1 = creates more xG than average. defence > 1 = concedes more than average (worse).
 
 Each rating is a recency-weighted ratio of actual xG to what an average team would have
-produced against the same opponents and venues, shrunk toward 1.0 by PRIOR_MATCHES
+produced against the same opponents and venues, shrunk toward 1.0 by `prior_matches`
 "average" matches so that ten games do not produce extreme ratings.
 """
 import pandas as pd
 
-HALF_LIFE = 8        # matches; a game 8 matches ago counts half as much as the latest
-PRIOR_MATCHES = 3    # strength of the pull toward league average
 
-
-def team_matches(player_gw: pd.DataFrame) -> pd.DataFrame:
+def team_matches(player_gw: pd.DataFrame, half_life: float = 8) -> pd.DataFrame:
     """One row per team per match: xG for and against (sum of player xG)."""
     tm = (player_gw.groupby(["fixture_id", "team_id", "opponent_team_id", "was_home", "gw"], as_index=False)
           .agg(xg_for=("expected_goals", "sum"), kickoff_time=("kickoff_time", "first")))
@@ -23,12 +20,15 @@ def team_matches(player_gw: pd.DataFrame) -> pd.DataFrame:
     tm = tm.merge(opp, on=["fixture_id", "opponent_team_id"], validate="1:1")
     tm = tm.sort_values("kickoff_time")
     age = tm.groupby("team_id").cumcount(ascending=False)
-    tm["w"] = 0.5 ** (age / HALF_LIFE)
+    tm["w"] = 0.5 ** (age / half_life)
     return tm
 
 
-def fit_ratings(player_gw: pd.DataFrame, n_iter: int = 30) -> dict:
-    tm = team_matches(player_gw)
+def fit_ratings(player_gw: pd.DataFrame, half_life: float = 8, prior_matches: float = 3,
+                n_iter: int = 30) -> dict:
+    """half_life: a game that many matches ago counts half as much as the latest.
+    prior_matches: strength of the pull toward league average."""
+    tm = team_matches(player_gw, half_life)
     mu_home = tm.loc[tm.was_home, "xg_for"].mean()
     mu_away = tm.loc[~tm.was_home, "xg_for"].mean()
     mu = (mu_home + mu_away) / 2
@@ -38,7 +38,7 @@ def fit_ratings(player_gw: pd.DataFrame, n_iter: int = 30) -> dict:
     teams = sorted(tm.team_id.unique())
     att = pd.Series(1.0, index=teams)
     dfn = pd.Series(1.0, index=teams)
-    k = PRIOR_MATCHES * mu
+    k = prior_matches * mu
     for _ in range(n_iter):  # attack depends on opponents' defence and vice versa, so iterate
         exp_for = tm.w * tm.mu_for * tm.opponent_team_id.map(dfn)
         att = ((tm.w * tm.xg_for).groupby(tm.team_id).sum() + k) / (exp_for.groupby(tm.team_id).sum() + k)

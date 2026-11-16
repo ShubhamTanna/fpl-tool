@@ -5,22 +5,17 @@ xP is built from separate parts, each estimated on its own and then scored with 
   defensive contribution, bonus, cards.
 Not modelled (small): own goals, penalty saves, penalty misses.
 
-All constants below are judgement calls, not fitted values. They have not been tuned
-to any backtest.
+The tunable numbers live in dials.py and change only through the backtest.
 """
 import re
 
 import numpy as np
 import pandas as pd
 
+from .dials import DIALS, Dials
 from .scoring import DC_THRESHOLD, load_scoring
 from .teams import fit_ratings
 
-MINUTES_HALF_LIFE = 3    # matches: minutes change fast, so recent games dominate
-RATE_HALF_LIFE = 8       # matches: per-90 output is noisy, so use a longer memory
-PRIOR_90S = 5            # this-season rate is blended with a prior worth 5 full matches
-PREV_SEASON_SHRINK = 5   # last season's rate is itself pulled to the position mean by 5 matches
-MAX_P_START = 0.95       # nobody is a certain starter
 RATE_STATS = ["expected_goals", "expected_assists", "defensive_contribution",
               "saves", "bonus", "yellow_cards", "red_cards"]
 
@@ -45,71 +40,147 @@ def _prob_at_least(lam, threshold) -> np.ndarray:
     return (_pois_pmf(lam) * (n >= np.asarray(threshold, dtype=float)[:, None])).sum(axis=1)
 
 
+def _prob_at_least_nb(mean, threshold, phi: float) -> np.ndarray:
+    """P(N >= threshold) when N has the given mean and variance = phi x mean (negative binomial).
+
+    Poisson forces variance = mean. Real match counts vary more than that, which matters
+    here because the threshold sits in the upper tail of most players' range.
+    """
+    mean, threshold = np.asarray(mean, dtype=float), np.asarray(threshold, dtype=float)
+    if phi <= 1.0:
+        return _prob_at_least(mean, threshold)
+    r, q = mean / (phi - 1), 1 - 1 / phi
+    pmf = (1 / phi) ** r                       # P(N = 0)
+    below = np.zeros_like(mean)                # running P(N < threshold)
+    for n in range(41):
+        below += np.where(n < threshold, pmf, 0.0)
+        pmf = pmf * (n + r) / (n + 1) * q
+    return 1 - below
+
+
+def dc_dispersion(hist: pd.DataFrame, min_matches: int = 3, min_players: int = 30) -> float:
+    """Variance / mean of a player's defensive-action count across his own full matches.
+
+    Measured from this season's matches so far, pooled over outfield players with at least
+    `min_matches` full 90s. Returns 1.0 (= Poisson) until `min_players` players qualify.
+    """
+    h = hist[(hist.minutes == 90) & hist.defensive_contribution.notna()]
+    g = h.groupby("player_id").defensive_contribution.agg(["mean", "var", "size"])
+    g = g[(g["size"] >= min_matches) & (g["mean"] > 0)]
+    if len(g) < min_players:
+        return 1.0
+    w = g["size"] - 1
+    return max(1.0, float((g["var"] * w).sum() / (g["mean"] * w).sum()))
+
+
+def dc_matchup(hist: pd.DataFrame, players: pd.DataFrame, prior_matches: float) -> pd.Series:
+    """Defender matchup: how many defensive actions players record AGAINST each club,
+    relative to what the same players record in their other matches (their own norm).
+    A player with under two full matches elsewhere is compared with his position's average.
+
+    Returns a multiplier indexed by (opponent club, position). 1.2 = opponents of this club
+    record 20% more defensive actions than average. Shrunk toward 1.0 by `prior_matches`
+    average matches, the same pull the team ratings use.
+    """
+    h = hist.merge(players[["player_id", "position"]], on="player_id")
+    h = h[(h.position != "GKP") & (h.minutes > 0)]
+    n90 = h.minutes / 90
+    pos_rate = h.groupby("position").defensive_contribution.sum() / n90.groupby(h.position).sum()
+    tot = h.groupby("player_id")[["defensive_contribution", "minutes"]].transform("sum")
+    other_min = tot.minutes - h.minutes
+    own_rate = (tot.defensive_contribution - h.defensive_contribution) / other_min.where(other_min >= 180) * 90
+    expected = n90 * own_rate.fillna(h.position.map(pos_rate))
+    key = [h.opponent_team_id, h.position]
+    obs, exp = h.defensive_contribution.groupby(key).sum(), expected.groupby(key).sum()
+    matches = h.groupby(key).fixture_id.nunique()
+    k = prior_matches * exp / matches          # what `prior_matches` average matches would add
+    return ((obs + k) / (exp + k)).rename("dc_mult")
+
+
+def conceded_ratio(hist: pd.DataFrame, seasons: pd.DataFrame, w: float = 1.0) -> float:
+    """Actual team goals per unit of player-summed xG (last season + this season so far).
+
+    Team goals include own goals, which no player's xG covers, and finishing as it really was.
+    """
+    prev = seasons[seasons.season_name == seasons.season_name.max()]
+    goals = hist.goals_scored.sum() + hist.own_goals.sum() + w * (prev.goals_scored.sum() + prev.own_goals.sum())
+    return goals / (hist.expected_goals.sum() + w * prev.expected_goals.sum())
+
+
 def _weights(hist: pd.DataFrame, half_life: float) -> pd.Series:
     age = hist.groupby("player_id").cumcount(ascending=False)  # 0 = most recent match
     return 0.5 ** (age / half_life)
 
 
-def minutes_model(hist: pd.DataFrame, players: pd.DataFrame) -> pd.DataFrame:
+def minutes_model(hist: pd.DataFrame, players: pd.DataFrame, d: Dials = DIALS) -> pd.DataFrame:
     """P(start), P(sub appearance), minutes when starting / as a sub, P(60+ | start)."""
     h = hist.copy()
-    h["w"] = _weights(h, MINUTES_HALF_LIFE)
+    h["w"] = _weights(h, d.minutes_half_life)
     h["start"] = h.starts == 1
     h["sub"] = (h.minutes > 0) & ~h.start
     lg_min_start = h.loc[h.start, "minutes"].mean()
     lg_p60 = (h.loc[h.start, "minutes"] >= 60).mean()
     lg_min_sub = h.loc[h["sub"], "minutes"].mean()
+    h["full"] = h.start & (h.minutes >= 90)      # started and finished
+    h["part"] = h.start & ~h.full                # started and was taken off
+    lg_p_full, lg_min_part = h.loc[h.start, "full"].mean(), h.loc[h.part, "minutes"].mean()
 
     def wsum(col):
         return (h.w * col).groupby(h.player_id).sum()
 
     w, ws, wb = wsum(1.0), wsum(h.start), wsum(h["sub"])
     out = pd.DataFrame({
-        "p_start": (ws / w).clip(upper=MAX_P_START),
+        "p_start": (ws / w).clip(upper=d.max_p_start),
         "p_sub": wb / w,
         # the "+ 2" terms pull small samples toward the league average
         "min_start": (wsum(h.minutes * h.start) + 2 * lg_min_start) / (ws + 2),
         "p60": (wsum((h.minutes >= 60) & h.start) + 2 * lg_p60) / (ws + 2),
         "min_sub": (wsum(h.minutes * h["sub"]) + 2 * lg_min_sub) / (wb + 2),
+        "p_full": (wsum(h.full) + 2 * lg_p_full) / (ws + 2),
+        "min_part": (wsum(h.minutes * h.part) + 2 * lg_min_part) / (wsum(h.part) + 2),
     })
     out["p_sub"] = np.minimum(out.p_sub, 1 - out.p_start)
     out = out.reindex(players.player_id)
     out[["p_start", "p_sub"]] = out[["p_start", "p_sub"]].fillna(0.0)  # no matches yet
-    return out.fillna({"min_start": lg_min_start, "p60": lg_p60, "min_sub": lg_min_sub})
+    return out.fillna({"min_start": lg_min_start, "p60": lg_p60, "min_sub": lg_min_sub,
+                       "p_full": lg_p_full, "min_part": lg_min_part})
 
 
-def rate_model(hist: pd.DataFrame, players: pd.DataFrame, seasons: pd.DataFrame) -> pd.DataFrame:
+def rate_model(hist: pd.DataFrame, players: pd.DataFrame, seasons: pd.DataFrame,
+               d: Dials = DIALS) -> pd.DataFrame:
     """Per-90 rates: recency-weighted this season, blended with a prior.
 
     prior = last season's per-90 rate, itself shrunk toward this season's position mean.
     A player with no last season (new signing, promoted club) gets the position mean.
+    So does a stat that was not recorded last season (blank in `seasons`).
     """
     h = hist.merge(players[["player_id", "position"]], on="player_id")
-    h["w"] = _weights(h, RATE_HALF_LIFE)
+    h["w"] = _weights(h, d.rate_half_life)
     n90 = h.minutes / 90
     pos_mean = h.groupby("position")[RATE_STATS].sum().div(n90.groupby(h.position).sum(), axis=0)
 
     prev = seasons[seasons.season_name == seasons.season_name.max()].set_index("player_id")
     prev = prev.reindex(players.player_id)
-    prev_n90 = (prev.minutes / 90).fillna(0)
     pm = pos_mean.loc[players.position].set_axis(players.player_id)
-    prior = (prev[RATE_STATS].fillna(0) + PREV_SEASON_SHRINK * pm).div(prev_n90 + PREV_SEASON_SHRINK, axis=0)
+    # minutes behind each stat: 0 where the player or the stat has no last season
+    prev_n90 = prev[RATE_STATS].notna().mul(prev.minutes.fillna(0) / 90, axis=0)
+    prior = (prev[RATE_STATS].fillna(0) + d.prev_season_shrink * pm) / (prev_n90 + d.prev_season_shrink)
 
     cur = h[RATE_STATS].mul(h.w, axis=0).groupby(h.player_id).sum().reindex(players.player_id).fillna(0)
     cur_n90 = (h.w * n90).groupby(h.player_id).sum().reindex(players.player_id).fillna(0)
-    rates = (cur + PRIOR_90S * prior).div(cur_n90 + PRIOR_90S, axis=0)
+    rates = (cur + d.prior_90s * prior).div(cur_n90 + d.prior_90s, axis=0)
     return rates.add_suffix("_p90")
 
 
-def conversion_ratios(hist: pd.DataFrame, seasons: pd.DataFrame) -> tuple[float, float]:
+def conversion_ratios(hist: pd.DataFrame, seasons: pd.DataFrame, w: float = 1.0) -> tuple[float, float]:
     """League-wide goals per xG and FPL assists per xA (last season + this season so far).
 
     FPL awards assists more generously than xA implies (rebounds, penalties won),
     so xA is scaled up by the observed ratio.
     """
-    prev = seasons[seasons.season_name == seasons.season_name.max()]
-    g = (hist.goals_scored.sum() + prev.goals_scored.sum()) / (hist.expected_goals.sum() + prev.expected_goals.sum())
-    a = (hist.assists.sum() + prev.assists.sum()) / (hist.expected_assists.sum() + prev.expected_assists.sum())
+    prev = seasons[seasons.season_name == seasons.season_name.max()]   # w = weight of last season
+    g = (hist.goals_scored.sum() + w * prev.goals_scored.sum()) / (hist.expected_goals.sum() + w * prev.expected_goals.sum())
+    a = (hist.assists.sum() + w * prev.assists.sum()) / (hist.expected_assists.sum() + w * prev.expected_assists.sum())
     return g, a
 
 
@@ -118,8 +189,10 @@ def availability(players: pd.DataFrame, events: pd.DataFrame, gws: list[int]) ->
 
     Next GW:   FPL's chance_of_playing_next_round (blank = 100%).
     Later GWs: if the news gives a date ("Expected back 22 Nov", "Suspended until 5 Dec"),
-               0 before that date and 1 after. With no date, recover by 25 points per GW
-               (an assumption). Status "u" (left the club / unavailable) = 0 throughout.
+               0 before that date and 1 after. With no date, hold FPL's chance flat for the
+               whole horizon: an injury with an unknown return is not assumed to heal. This is
+               a cautious assumption, not a tested one (nobody publishes past injury flags to
+               test with). Status "u" (left the club / unavailable) = 0 throughout.
     """
     deadline = events.set_index("gw").deadline_time
     now = deadline[gws[0]]
@@ -139,7 +212,7 @@ def availability(players: pd.DataFrame, events: pd.DataFrame, gws: list[int]) ->
         if k == 0:
             a = base.copy()
         else:
-            a = np.minimum(1.0, base + 0.25 * k)
+            a = base.copy()
             # a GW's matches run for about 3 days after its deadline
             dated = np.where(back <= deadline[gw] + pd.Timedelta(days=3), 1.0, 0.0)
             a = np.where(back.notna(), dated, a)
@@ -148,12 +221,16 @@ def availability(players: pd.DataFrame, events: pd.DataFrame, gws: list[int]) ->
 
 
 def project(tables: dict, as_of_gw: int | None = None, horizon: int = 8,
-            use_availability: bool = True) -> tuple[pd.DataFrame, dict]:
+            use_availability: bool = True, dials: Dials = DIALS, scoring: dict | None = None,
+            dc_threshold: dict | None = None) -> tuple[pd.DataFrame, dict]:
     """xP for every player for the `horizon` gameweeks after `as_of_gw`.
 
     Only matches up to and including `as_of_gw` are used, so passing an earlier
     gameweek gives an honest backtest. Returns (one row per player per GW, team ratings).
+    `scoring` and `dc_threshold` default to this season's rules; the backtest passes
+    the rules of the season it is replaying.
     """
+    d = dials
     players, fixtures, events = tables["players"], tables["fixtures"], tables["events"]
     seasons = tables["player_seasons"]
     if as_of_gw is None:
@@ -162,14 +239,15 @@ def project(tables: dict, as_of_gw: int | None = None, horizon: int = 8,
     hist = hist[hist.gw <= as_of_gw].sort_values("kickoff_time")
     gws = [g for g in range(as_of_gw + 1, as_of_gw + 1 + horizon) if g <= events.gw.max()]
 
-    s = load_scoring()
-    ratings = fit_ratings(hist)
+    s = scoring or load_scoring()
+    dc_threshold = dc_threshold or DC_THRESHOLD
+    ratings = fit_ratings(hist, d.team_half_life, d.team_prior_matches)
     att, dfn, mu = ratings["attack"], ratings["defence"], ratings["mu"]
-    g_ratio, a_ratio = conversion_ratios(hist, seasons)
+    g_ratio, a_ratio = conversion_ratios(hist, seasons, d.ratio_prev_weight)
 
     per_player = pd.concat(
         [players.set_index("player_id")[["web_name", "position", "team", "team_id", "now_cost"]],
-         minutes_model(hist, players), rate_model(hist, players, seasons)], axis=1).reset_index()
+         minutes_model(hist, players, d), rate_model(hist, players, seasons, d)], axis=1).reset_index()
 
     # One row per team per upcoming fixture, then one row per player per fixture.
     fx = fixtures[fixtures.gw.isin(gws)]
@@ -185,6 +263,7 @@ def project(tables: dict, as_of_gw: int | None = None, horizon: int = 8,
     short = tables["teams"].set_index("team_id").short_name
     tf["opp"] = tf.opp_id.map(short) + np.where(tf.is_home, "(H)", "(A)")
 
+    ratings["team_fixtures"] = tf      # expected goals for/against per team per fixture
     df = per_player.merge(tf, on="team_id")
     if use_availability:
         av = availability(players, events, gws).stack().rename("avail")
@@ -203,12 +282,26 @@ def project(tables: dict, as_of_gw: int | None = None, horizon: int = 8,
                                + df.p_sub * s["short_play"])
     df["xp_goals"] = df.expected_goals_p90 * df.att_mult * g_ratio * n90 * pos.map(s["goals_scored"])
     df["xp_assists"] = df.expected_assists_p90 * df.att_mult * a_ratio * n90 * s["assists"]
-    df["p_cs"] = np.exp(-df.lam_against * share)
+    lam_pts = df.lam_against * (conceded_ratio(hist, seasons, d.ratio_prev_weight) if d.conceded_ratio else 1.0)
+    df["p_cs"] = np.exp(-lam_pts * share)
     df["xp_cs"] = a_start * df.p60 * df.p_cs * pos.map(s["clean_sheets"])
-    df["xp_conceded"] = a_start * _exp_floor_div(df.lam_against * share, 2) * pos.map(s["goals_conceded"])
+    df["xp_conceded"] = a_start * _exp_floor_div(lam_pts * share, 2) * pos.map(s["goals_conceded"])
     saves = df.saves_p90 * df.save_mult * share
     df["xp_saves"] = np.where(pos == "GKP", a_start * _exp_floor_div(saves, 3) * s["saves"], 0.0)
-    df["p_dc"] = _prob_at_least(df.defensive_contribution_p90 * share, pos.map(DC_THRESHOLD))
+    dc_mean = df.defensive_contribution_p90 * share
+    if d.dc_matchup:
+        mult = dc_matchup(hist, players, d.team_prior_matches)
+        dc_mean = dc_mean * df.join(mult, on=["opp_id", "position"]).dc_mult.fillna(1.0)
+    phi = dc_dispersion(hist) if d.dc_dist == "negbin" else 1.0
+    thr = pos.map(dc_threshold)
+    if d.dc_minutes_mix:
+        # the threshold is in the tail, so "90 minutes sometimes, 65 other times" reaches it
+        # more often than "80 minutes every time" does
+        rate = dc_mean / share
+        df["p_dc"] = (df.p_full * _prob_at_least_nb(rate, thr, phi)
+                      + (1 - df.p_full) * _prob_at_least_nb(rate * df.min_part / 90, thr, phi))
+    else:
+        df["p_dc"] = _prob_at_least_nb(dc_mean, thr, phi)
     df["xp_dc"] = a_start * df.p_dc * pos.map(s["defensive_contribution"])
     df["xp_bonus"] = df.bonus_p90 * n90 * s["bonus"]
     df["xp_cards"] = (df.yellow_cards_p90 * s["yellow_cards"] + df.red_cards_p90 * s["red_cards"]) * n90

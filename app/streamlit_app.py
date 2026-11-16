@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from fpl.ingest.team import load_team  # noqa: E402
 from fpl.insights import signals as sig_rules  # noqa: E402
 from fpl.optimize.checker import check_lineup, check_plan, check_squad  # noqa: E402
-from fpl.optimize.models import build_squad, plan_transfers  # noqa: E402
+from fpl.optimize.models import MIN_GAIN, build_squad, plan_transfers  # noqa: E402
 from fpl.optimize.rules import load_rules  # noqa: E402
 
 P = ROOT / "data" / "processed"
@@ -59,14 +59,14 @@ def show(df: pd.DataFrame, **kw) -> None:
 
 
 @st.cache_data(show_spinner=False)
-def run_plan(team_id: int, horizon: int, ft_override: int | None):
+def run_plan(team_id: int, horizon: int, ft_override: int | None, min_gain: float):
     r, players, proj = rules(), table("players"), table("projections")
     gws = gameweeks()[:horizon]
     team = load_team(team_id, players, table("player_gw"), gws[0] - 1, r.sell_fee, r.max_free_transfers)
     derived_ft = team["free_transfers"]
     if ft_override:
         team["free_transfers"] = ft_override
-    plan = plan_transfers(team, proj, players, r, gws)
+    plan = plan_transfers(team, proj, players, r, gws, min_gain=min_gain)
     hold = plan_transfers(team, proj, players, r, gws, allow_transfers=False)
     errs = check_plan(plan, team, players, r) + check_plan(hold, team, players, r)
     return team, derived_ft, plan, hold, errs
@@ -88,19 +88,23 @@ def run_squad(horizon: int, budget: int):
 def page_my_team() -> None:
     st.title("My Team")
     st.caption("Transfer plan, starting XI and captain for your team, from the xP projections.")
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     team_id = c1.number_input("FPL team ID", min_value=1, value=None, step=1, format="%d",
                               help="The number in the URL of your Points page: /entry/<ID>/event/10")
     horizon = c2.slider("Gameweeks to plan", 1, 5, 5)
     ft_choice = c3.selectbox("Free transfers", ["Work it out", 1, 2, 3, 4, 5],
                              help="FPL does not publish this. 'Work it out' replays your season.")
+    min_gain = c4.number_input("Minimum gain per transfer (xP)", 0.0, 10.0, MIN_GAIN, 0.5,
+                               help="A transfer is suggested only if it adds more than this many xP over "
+                                    "the gameweeks planned. Higher = roll transfers more often.")
     if not team_id:
         st.info("Enter your FPL team ID to build a plan.")
         return
     try:
         with st.spinner("Loading your team and solving (about 15 seconds)..."):
             team, derived_ft, plan, hold, errs = run_plan(int(team_id), horizon,
-                                                          None if ft_choice == "Work it out" else ft_choice)
+                                                          None if ft_choice == "Work it out" else ft_choice,
+                                                          min_gain)
     except Exception as e:  # bad id, FPL API down, or no feasible plan
         st.error(f"Could not build a plan for team {team_id}: {e}")
         return

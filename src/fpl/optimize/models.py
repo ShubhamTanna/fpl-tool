@@ -14,6 +14,11 @@ DECAY = 0.9            # each further gameweek counts 10% less: later projection
 BENCH_OUTFIELD = 0.10  # a bench outfielder is worth 10% of his xP (chance he is subbed on)
 BENCH_GKP = 0.02       # the reserve keeper almost never plays
 FT_VALUE = 1.0         # points credited per free transfer left unused at the end of the plan
+# A transfer is suggested only if it adds more than this many xP over the horizon (later weeks
+# weighted down). Chosen for Shubham's rule "pick well, roll transfers". The backtest
+# (scripts/backtest_threshold.py) could not separate values from 0 to 6: season totals moved
+# by less than the season-to-season noise, so this is a judgement call, not a fitted value.
+MIN_GAIN = 2.0
 
 
 def _solve(prob: pulp.LpProblem, time_limit: int = 120) -> None:
@@ -112,11 +117,13 @@ def pick_team(squad: list[int], proj: pd.DataFrame, players: pd.DataFrame, rules
 
 
 def plan_transfers(team: dict, proj: pd.DataFrame, players: pd.DataFrame, rules: Rules, gws: list[int],
-                   allow_transfers: bool = True) -> dict:
+                   allow_transfers: bool = True, min_gain: float = MIN_GAIN) -> dict:
     """Best transfers, XI and captain for each gameweek in `gws`, starting from `team`.
 
     team = {"squad": [ids], "bank": int, "free_transfers": int, "sell_price": {id: price}}
     Free transfers roll over (up to the cap); each transfer beyond them costs rules.hit_cost.
+    min_gain: every transfer is charged this many xP inside the solver, so one is made only
+    if it adds more than that. The charge is not part of the reported xP.
     """
     p = _pool(players, keep=team["squad"])
     ids, pos, club, cost = list(p.index), p.position.to_dict(), p.team.to_dict(), p.now_cost.to_dict()
@@ -144,7 +151,8 @@ def plan_transfers(team: dict, proj: pd.DataFrame, players: pd.DataFrame, rules:
         ft_next = prob.add_variable(f"ft_{gw}", lowBound=1, upBound=rules.max_free_transfers)
         prob += ft_next <= ft - (n - hits) + 1                         # unused free transfers roll over
         y, c = _add_lineup(prob, x, ids, pos, rules, str(gw))
-        obj.append(DECAY ** k * (_gw_value(x, y, c, ids, xp[gw].to_dict(), pos) - rules.hit_cost * hits))
+        obj.append(DECAY ** k * (_gw_value(x, y, c, ids, xp[gw].to_dict(), pos) - rules.hit_cost * hits)
+                   - min_gain * n)
         state[gw] = (x, buy, out, y, c, bank, hits, ft)
         prev_x, prev_bank, ft = x, bank, ft_next
     obj.append(DECAY ** (len(gws) - 1) * FT_VALUE * ft)                # small credit for transfers left over

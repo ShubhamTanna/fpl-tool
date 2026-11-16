@@ -38,3 +38,19 @@ def actual_points(df: pd.DataFrame, s: dict) -> pd.Series:
         + dc_hit * pos.map(s["defensive_contribution"])
     )
     return pts.where(played, 0)
+
+
+FIRST_DC_SEASON = "2025-26"
+
+
+def season_rules(season: str, current: dict) -> tuple[dict, dict]:
+    """(scoring, DC thresholds) for a season named like "2024-25".
+
+    Checked 16 Nov 2026 by rebuilding every match score in data/processed/history_gw.parquet:
+    today's rules reproduce 2025-26, and today's rules with defensive-contribution points
+    removed reproduce 2022-23 to 2024-25 (at most 4 rows differ in any season).
+    `current` is today's scoring from load_scoring().
+    """
+    if season >= FIRST_DC_SEASON:
+        return current, DC_THRESHOLD
+    return {**current, "defensive_contribution": {k: 0 for k in current["defensive_contribution"]}}, DC_THRESHOLD
