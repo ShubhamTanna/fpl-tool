@@ -4,3 +4,4 @@ pyarrow
 pulp
 streamlit
 duckdb
+highspy
