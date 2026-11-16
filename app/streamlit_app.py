@@ -5,7 +5,6 @@
 import streamlit as st
 
 import common
-import legacy_pages as old
 
 st.set_page_config(page_title="FPL Tool", layout="wide")
 common.apply_theme()
@@ -17,8 +16,7 @@ pages = [
     st.Page("app_pages/boosts.py", title="Boosts", url_path="boosts"),
     st.Page("app_pages/scout.py", title="Scout", url_path="scout"),
     st.Page("app_pages/projections.py", title="Projections", url_path="projections"),
-    st.Page(old.page_template, title="Template", url_path="template"),
-    st.Page(old.page_fixtures, title="Fixtures", url_path="fixtures"),
+    st.Page("app_pages/model_lab.py", title="Model lab", url_path="model-lab"),
 ]
 nav = st.navigation(pages, position="top")
 nav.run()

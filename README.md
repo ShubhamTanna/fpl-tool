@@ -1,29 +1,41 @@
-# fpl-tool
+# FPL Tool
 
-Personal Fantasy Premier League decision tool: projections, squad optimisation, transfer planning and captaincy from free data.
+Personal Fantasy Premier League tool for one team. Local only.
 
 ## Setup
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python scripts/check_setup.py
 ```
-
-## Refresh the data
-
-```bash
-python scripts/build_data.py
-python scripts/build_projections.py
-python scripts/build_insights.py
-python scripts/build_template.py
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env      # then set FPL_TEAM_ID
 ```
 
 ## Run the app
 
-```bash
-streamlit run app/streamlit_app.py
+From the project root:
+
+```
+.venv/bin/streamlit run app/streamlit_app.py
+```
+
+Pages: My team, Drafts, Player, Boosts, Scout, Projections, Model lab. The Refresh data button on My team
+fetches new FPL data and rebuilds the projections. Drafts and boosts are stored in `data/user/` (not committed);
+use the export button on Drafts or Boosts for a backup.
+
+## Rebuild from the command line
+
+```
+.venv/bin/python scripts/build_data.py          # FPL data tables
+.venv/bin/python scripts/build_projections.py   # projections (no boosts)
+.venv/bin/python scripts/build_insights.py      # ticker and underperformer signal
+.venv/bin/python scripts/build_template.py      # top-1,000 template, about 17 minutes
+.venv/bin/python scripts/plan_team.py --team-id <ID>
+```
+
+## Tests
+
+```
+.venv/bin/python -m pytest tests
 ```
 
 ## Backtest and tuning (Step 6)

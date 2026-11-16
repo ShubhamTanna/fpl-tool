@@ -216,7 +216,29 @@ Save results to data/processed/ so the app can show them.
 
 **Check for Step 6:** show before/after tables for tune seasons and hold-out, the trial log, and the GW11 top 10 per position before/after. Then stop.
 
-### Step 7 - Personal rebuild (outline only; do not start until Step 6 is approved)
+### Step 7 result (built 17 Nov 2026, sections A to H, one commit each)
+
+Run from the project root: `.venv/bin/streamlit run app/streamlit_app.py`. After editing code under `src/` or `app/common.py`, restart the app (page files reload on their own, imported modules do not).
+
+Pages (`app/app_pages/`), shared helpers in `app/common.py`:
+- **My team**: loads team 108672 from `.env`, applies transfers already made for the next gameweek, plan with lock / ban / max transfers per gameweek / minimum gain / horizon, refresh-data button, deadline in IST, xP by part for every player, top-1,000 ownership, tickers with his clubs first.
+- **Drafts**: unlimited drafts in `data/user/drafts.json` (name, start gameweek, note). Created from a copy of the real team or from the squad builder. Swaps enforce budget, positions and 3-per-club. An edit is stored under the gameweek it takes effect. Comparison with the real team: actual points for played gameweeks, projected points ahead, running difference.
+- **Player**: match log, per-90 rates, past seasons, xP by gameweek with its inputs, set pieces, ownership and price trend, record against upcoming opponents (display only), compare mode for 2 to 4 players.
+- **Boosts**: output (multiplies goal and assist points) and minutes (replaces chance of starting), in `data/user/boosts.json`. They feed `project(boosts=...)`, so every page uses them; boosted players are marked `[boost]`. Never deleted: cancelling cuts the end gameweek and stamps it. Ended boosts are scored: xP without, xP with, actual.
+- **Scout**: xG underperformers, minutes rising, xP per million, fixture swing. Rules and thresholds are printed on the page and live in `src/fpl/insights/signals.py` and `scout.py`. None is backtested.
+- **Projections**: the full table with every part.
+- **Model lab**: backtest summary, calibration, trial log, dials, threshold backtest. Read-only.
+
+The old Template, Signals, Fixtures and Squad builder pages are gone: ownership is a column, tickers are on My team, signals are in Scout, the squad builder is a way to start a draft.
+
+Method notes:
+- The app builds projections live from the data tables (`common.proj`), so boosts apply at once. `projections.parquet` is the no-boost copy the scripts write.
+- A past gameweek (draft actuals, boost scoring) is re-projected from the matches before it, without the injury flags of the time, which nobody publishes.
+- A draft's actual score is its auto-picked XI with the captain doubled: no automatic substitutions, no chips. The real team's score is FPL's official one minus hits. The two are not like for like.
+- Refresh re-fetches prices, news and fixtures every time, and every player's match history (about 12 minutes) only when FPL shows matches the stored data lacks. It does not re-scan the top-1,000 template: run `scripts/build_template.py` (about 17 minutes).
+- Tests: `.venv/bin/python -m pytest tests` (team loader, draft rules, boost application).
+
+### Step 7 - original outline (kept for reference)
 - My Team: plan with lock / ban / max-transfers / threshold controls; apply transfers already made this GW; refresh-data button; deadline in IST.
 - Drafts: unlimited saved draft teams, separate from the real team, each stored with its start GW. Show projected points forward and actual points once played, side by side with the real team.
 - Player page: full match-by-match FPL stats, xP breakdown, record vs upcoming opponents (display only), Understat shots when available.
@@ -268,6 +290,9 @@ He reports doing well above average in FPL. These methods have not been tested o
 ---
 
 ## Open items
+- Transfers already made for the next gameweek: the handling is covered by tests on made-up data only. No pending transfer existed on 17 Nov 2026, so it has not been seen working on the real team. Check it the first time a transfer is made before a deadline.
+- The top-1,000 template is from GW10 and is not refreshed by the app's button.
+- The Scout rules and the optimizer settings (DECAY, bench weights, FT_VALUE, MIN_GAIN) are judgement calls with no backtest behind them.
 - Odds API key (v2)
 - Understat merge (Section 1) deferred: understat.com was offline on 16 Nov 2026 ("We will come back soon"). When it is back, find the current data endpoint, build the loader and report the FPL id match rate.
 - Defensive-contribution thresholds: DEF 10 CBIT and MID 12 CBIRT confirmed from GW1-10 data (16 Nov 2026). FWD 12 is still an assumption: the data only narrows it to 11-16.
