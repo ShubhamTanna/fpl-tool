@@ -1,0 +1,34 @@
+# Theme taken from shubhamtanna.in (read 17 Nov 2026): paper background, ink text, red accent,
+# Playfair Display headings, Newsreader body, JetBrains Mono labels, square corners.
+[theme]
+base = "light"
+primaryColor = "#ff0000"
+backgroundColor = "#e8e7e2"
+secondaryBackgroundColor = "#dfded8"
+textColor = "#121211"
+linkColor = "#c8141a"
+borderColor = "#c7c5bd"
+codeBackgroundColor = "#dfded8"
+codeTextColor = "#121211"
+dataframeBorderColor = "#c7c5bd"
+dataframeHeaderBackgroundColor = "#dfded8"
+dataframeHeaderTextColor = "#5d5b56"
+font = "Newsreader:https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400..700&display=swap"
+headingFont = "'Playfair Display':https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+baseFontSize = 16
+headingFontWeights = 900
+headingFontSizes = ["2.25rem", "1.5rem", "1.15rem"]
+metricValueFontSize = "1.6rem"
+baseRadius = "none"
+buttonRadius = "none"
+showWidgetBorder = true
+paddingTop = "1.5rem"
+paddingBottom = "3rem"
+chartCategoricalColors = ["#121211", "#ff0000", "#5d5b56", "#a69986", "#c8141a", "#9d9b95"]
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"

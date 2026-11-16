@@ -170,7 +170,7 @@ Sections 0-5 are built. Phase 2 replaces the remaining v1/v2 plan above where th
 - Every screen is about his team: his squad, his drafts, candidates to bring in.
 - He wants detail, not abstraction: raw FPL (and later Understat) statistics visible in the interface, with the xP breakdown next to them.
 - He will not hand-tune the model dials. Dials change only through the backtest (Step 6).
-- His team ID is not recorded here. Two ids are in data/raw/entry (108672, 895045); ask him which is his.
+- His team ID is 108672. It is stored in `.env` as `FPL_TEAM_ID` (not committed) and the app reads it from there. No ID input box.
 
 ### Review findings (measured 16 Nov 2026, backtest of GW4-10, 4,672 player-gameweeks)
 - Totals are calibrated: 6,206 projected vs 6,394 actual points.
@@ -187,7 +187,7 @@ Sections 0-5 are built. Phase 2 replaces the remaining v1/v2 plan above where th
 ### Step 6 - Backtest harness, projection fixes, defender matchup (BUILD THIS NEXT)
 
 **6a. Historical data.** Load past seasons from GitHub `vaastav/Fantasy-Premier-League` (`data/<season>/gws/merged_gw.csv`). Checked 16 Nov 2026:
-- 2022-23, 2023-24, 2024-25, 2025-26 have per-GW xG and starts. 2021-22 and earlier do not: do not use them.
+- 2023-24, 2024-25 and 2025-26 have per-GW xG and starts for the whole season. 2022-23 has them only from GW16 (corrected 17 Nov 2026): it is used as "last season" for 2023-24, not replayed. 2021-22 and earlier have none: do not use them.
 - Only 2025-26 has defensive_contribution. Scoring rules differ by season (defensive-contribution points did not exist before 2025-26): score each season with its own rules, and test the DC part on 2025-26 and 2026-27 only.
 - Player ids change every season. Map across seasons with the `code` field, not `id`.
 
@@ -199,7 +199,7 @@ Sections 0-5 are built. Phase 2 replaces the remaining v1/v2 plan above where th
 Save results to data/processed/ so the app can show them.
 
 **6c. Tuning protocol (strict).**
-- Tune on 2022-23 to 2024-25. Hold out 2025-26: it is looked at only to accept or reject a change.
+- Tune on 2023-24 and 2024-25. Hold out 2025-26: it is looked at only to accept or reject a change.
 - Change one dial at a time. Keep a change only if the hold-out season improves.
 - Log every trial (dial, old value, new value, tune result, hold-out result) to a table in the repo.
 - Never tune on 2026-27 data. It is the live check.
@@ -229,6 +229,31 @@ Save results to data/processed/ so the app can show them.
 - Zone matchup (left / centre / right), long-shot matchup, team set-piece xG. Each must pass the harness before it enters xP.
 - Record vs a specific opponent and reverse fixture: display only unless the harness shows value (expected: none).
 
+### Step 6 result and decisions (17 Nov 2026)
+
+Step 6 is built, approved and pushed (commit e97a49e). Nine trials, two accepted: defensive-action counts use a negative binomial spread (`dc_dist`) and treat a full 90 and an early substitution separately (`dc_minutes_mix`). Overall error is unchanged; defensive-contribution calibration on the hold-out moved from 0.75 to 0.88. The defender-matchup signal failed twice and is off. Full record: `data/processed/trial_log.csv`.
+
+Decisions Shubham has made (do not re-ask):
+- Team ID 108672, in `.env`, read by the app.
+- Checked against the FPL site on 17 Nov 2026: 2 free transfers and 2.1m bank for GW11 are correct.
+- Drafts and boosts live in `data/user/` (gitignored), with an export button for backup.
+- Transfer threshold default 2.0 xP, a visible setting. The backtest could not choose it; it is his rule.
+- Flatness is closed. Bucket calibration is fine, and Palmer vs Le Fee reflects this season's xGI with identical minutes. Do not investigate the minutes model. Stop tuning dials. Trials 7 and 8 stay.
+- The Step 6 judgement calls are accepted: RMSE as the acceptance yardstick, part-specific fixes judged on their own part, defensive-contribution trials tuned on 2025-26 GW2-19 and accepted on GW20-38.
+- An injury with no return date holds FPL's chance flat (untested, cautious).
+- Section 5 deploy is cancelled. The app is local only.
+- Step 7 is built in one run, sections A to H, without stopping for approval between sections.
+
+### Theme (Step 7A)
+
+Taken from shubhamtanna.in on 17 Nov 2026: paper `#e8e7e2`, panel `#dfded8`, ink `#121211`, muted `#5d5b56`, rule `#c7c5bd`, accent red `#ff0000` (accent text `#c8141a`); Playfair Display 900 headings, Newsreader body, JetBrains Mono labels; square corners; tabular figures. Set in `.streamlit/config.toml`, plus four CSS rules in `app/common.py`.
+
+Could not be matched in Streamlit:
+- Table headers. The site uses 11px uppercase mono headers and right-aligned ruled rows. Streamlit draws tables on a canvas, which takes colours and the body font from the theme but no header styling.
+- The site's 18px body and very large display headings. The app uses 16px and smaller headings to stay data-dense.
+- The dark "night" bands and the hero imagery. Not used.
+- Fonts load from Google Fonts, so they need an internet connection; offline the app falls back to system serif fonts.
+
 ## Shubham's methods (encode as signals, test later)
 
 1. **Form x zone matchup (v2):** an in-form player facing a team that is weak in his zone (e.g. a right winger vs a weak left side). Needs:
@@ -243,7 +268,6 @@ He reports doing well above average in FPL. These methods have not been tested o
 ---
 
 ## Open items
-- Shubham's FPL team ID (ask which of 108672 / 895045 is his)
 - Odds API key (v2)
 - Understat merge (Section 1) deferred: understat.com was offline on 16 Nov 2026 ("We will come back soon"). When it is back, find the current data endpoint, build the loader and report the FPL id match rate.
 - Defensive-contribution thresholds: DEF 10 CBIT and MID 12 CBIRT confirmed from GW1-10 data (16 Nov 2026). FWD 12 is still an assumption: the data only narrows it to 11-16.
