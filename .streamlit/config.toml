@@ -1,31 +1,30 @@
-# Theme taken from shubhamtanna.in (read 17 Nov 2026): paper background, ink text, red accent,
-# Playfair Display headings, Newsreader body, JetBrains Mono labels, square corners.
+# Dark football-analytics theme (Step 8). Sans-serif text, monospace numbers, one bright accent.
+# Roboto is used because its digits are equal-width by default, so numbers line up in tables.
 [theme]
-base = "light"
-primaryColor = "#ff0000"
-backgroundColor = "#e8e7e2"
-secondaryBackgroundColor = "#dfded8"
-textColor = "#121211"
-linkColor = "#c8141a"
-borderColor = "#c7c5bd"
-codeBackgroundColor = "#dfded8"
-codeTextColor = "#121211"
-dataframeBorderColor = "#c7c5bd"
-dataframeHeaderBackgroundColor = "#dfded8"
-dataframeHeaderTextColor = "#5d5b56"
-font = "Newsreader:https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400..700&display=swap"
-headingFont = "'Playfair Display':https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&display=swap"
-codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
-baseFontSize = 16
-headingFontWeights = 900
-headingFontSizes = ["2.25rem", "1.5rem", "1.15rem"]
+base = "dark"
+primaryColor = "#22D3EE"
+backgroundColor = "#0B0F14"
+secondaryBackgroundColor = "#151B23"
+textColor = "#E6EDF3"
+linkColor = "#22D3EE"
+borderColor = "#2A3441"
+codeBackgroundColor = "#151B23"
+dataframeBorderColor = "#222B36"
+dataframeHeaderBackgroundColor = "#151B23"
+dataframeHeaderTextColor = "#9AA7B4"
+greenColor = "#2ECC71"
+redColor = "#FF4D4F"
+font = "Roboto:https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap"
+headingFont = "Roboto:https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap"
+baseFontSize = 15
+headingFontWeights = 700
+headingFontSizes = ["1.9rem", "1.3rem", "1.05rem"]
 metricValueFontSize = "1.6rem"
-baseRadius = "none"
-buttonRadius = "none"
+baseRadius = "medium"
 showWidgetBorder = true
-paddingTop = "1.5rem"
+paddingTop = "1.25rem"
 paddingBottom = "3rem"
-chartCategoricalColors = ["#121211", "#ff0000", "#5d5b56", "#a69986", "#c8141a", "#9d9b95"]
 
 [browser]
 gatherUsageStats = false

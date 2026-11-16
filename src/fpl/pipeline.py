@@ -51,3 +51,21 @@ def refresh(progress=None) -> dict:
     full = new_matches_played()
     tables = build_all(max_age_hours=0, history_max_age_hours=0 if full else FOREVER, progress=progress)
     return {**rebuild_derived(tables), "full_history": full}
+
+
+def rebuild_template(n: int = 1000, progress=None) -> int:
+    """Re-scan the top `n` overall managers' squads for the last finished gameweek (one request
+    per manager, about a second each). Returns the number of managers scanned."""
+    from .insights.template import fetch_picks, template_table, top_entries
+    players, events = (pd.read_parquet(PROCESSED_DIR / f"{x}.parquet") for x in ("players", "events"))
+    gw = int(events.loc[events.finished, "gw"].max())
+    entries = top_entries(n, gw)
+    rows = []
+    for k in range(0, len(entries), 25):                       # in batches, so progress can be shown
+        rows.append(fetch_picks(entries[k:k + 25], gw, log_every=10 ** 9))
+        if progress:
+            progress(min(k + 25, len(entries)), len(entries))
+    picks = pd.concat(rows, ignore_index=True)
+    picks.to_parquet(PROCESSED_DIR / "top_picks.parquet", index=False)
+    template_table(picks, players).to_parquet(PROCESSED_DIR / "template.parquet", index=False)
+    return picks.entry.nunique()

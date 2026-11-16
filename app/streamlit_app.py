@@ -9,8 +9,14 @@ import common
 st.set_page_config(page_title="FPL Tool", layout="wide")
 common.apply_theme()
 
+def home() -> None:
+    """The root URL. My team has its own address (/my-team), so the root just forwards to it."""
+    st.switch_page("app_pages/my_team.py")
+
+
 pages = [
-    st.Page("app_pages/my_team.py", title="My team", url_path="my-team", default=True),
+    st.Page(home, title="Home", url_path="home", default=True, visibility="hidden"),
+    st.Page("app_pages/my_team.py", title="My team", url_path="my-team"),
     st.Page("app_pages/drafts.py", title="Drafts", url_path="drafts"),
     st.Page("app_pages/player.py", title="Player", url_path="player"),
     st.Page("app_pages/boosts.py", title="Boosts", url_path="boosts"),

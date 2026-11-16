@@ -19,16 +19,15 @@ PARTS = {"xp_app": "Appearance", "xp_goals": "Goals", "xp_assists": "Assists", "
          "xp_bonus": "Bonus", "xp_cards": "Cards"}
 POSITIONS = ["GKP", "DEF", "MID", "FWD"]
 
-# The site's small-caps label style (mono, uppercase, muted) for widget and metric labels,
-# its ruled page title, tabular figures, and ink text on red buttons. Everything else is
-# set in .streamlit/config.toml.
+# Numbers in monospace wherever CSS can reach them (metrics, labels); the rest of the look
+# is set in .streamlit/config.toml and the Plotly template in viz.py.
 CSS = """<style>
 .stApp { font-variant-numeric: tabular-nums; }
+[data-testid="stMetricValue"] { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-weight: 500; }
 [data-testid="stWidgetLabel"] p, [data-testid="stMetricLabel"] p {
   font: 500 11px "JetBrains Mono", ui-monospace, Menlo, monospace;
-  text-transform: uppercase; letter-spacing: .06em; color: #5d5b56; }
-h1 { border-bottom: 1.5px solid #121211; padding-bottom: .35rem; }
-button[kind="primary"], button[kind="primary"] p { color: #121211; }
+  text-transform: uppercase; letter-spacing: .06em; color: #9AA7B4; }
+button[kind="primary"], button[kind="primary"] p { color: #0B0F14; font-weight: 700; }
 </style>"""
 
 
@@ -87,8 +86,11 @@ def player_rows(ids: list[int], gws: list[int], extra: dict | None = None) -> pd
     return df
 
 
-def show(df: pd.DataFrame, **kw) -> None:
-    st.dataframe(df, hide_index=True, width="stretch", **kw)
+def show(df: pd.DataFrame, decimals: int = 2, heat: list[str] | None = None, **kw):
+    """A table in the shared style (see viz.style). decimals: 1 for summaries, 2 for breakdowns."""
+    import viz
+    s, cfg = viz.style(df, decimals, heat)
+    return st.dataframe(s, hide_index=True, width="stretch", column_config=cfg, **kw)
 
 
 @st.cache_data(show_spinner=False)
@@ -196,28 +198,25 @@ def breakdown(ids: list[int], gws: list[int], extra: dict | None = None) -> pd.D
     return out
 
 
-def ticker_grid(value: str, best_high: bool, first: list[str] = ()):
-    """Club x gameweek grid, coloured green (good) to red. Clubs in `first` are listed on top."""
-    ticker = table("ticker")
-    vals = ticker.pivot(index="team", columns="gw", values=value)
-    text = ticker.assign(cell=ticker.opp + "  " + ticker[value].map("{:.2f}".format)).pivot(
-        index="team", columns="gw", values="cell")
-    order = vals.sum(axis=1).sort_values(ascending=not best_high).index
-    order = [t for t in order if t in first] + [t for t in order if t not in first]
-    vals, text = vals.loc[order], text.loc[order]
-    lo, hi = vals.values.min(), vals.values.max()
+def cards(res: dict, gw: int, projection: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Rows for viz.pitch from a lineup dict (xi, bench, captain, vice) for gameweek `gw`."""
+    d = proj() if projection is None else projection
+    d = d[d.gw == gw].set_index("player_id")
+    p = table("players").set_index("player_id")
+    rows = []
+    for k, i in enumerate(res["xi"] + res["bench"]):
+        chance, status = p.chance_of_playing_next_round[i], p.status[i]
+        flag = f"{int(chance)}%" if pd.notna(chance) and chance < 100 else ("flag" if status != "a" else "")
+        rows.append({"name": p.web_name[i], "team": p.team[i], "pos": p.position[i],
+                     "opp": d.opp.get(i, "-"), "xp": float(d.xp.get(i, 0.0)),
+                     "slot": "XI" if k < len(res["xi"]) else f"B{k - len(res['xi']) + 1}",
+                     "role": "C" if i == res["captain"] else "V" if i == res["vice"] else "",
+                     "boosted": bool(d.boosted.get(i, False)) if "boosted" in d else False, "flag": flag})
+    return pd.DataFrame(rows)
 
-    def colour(_):
-        score = (vals - lo) / (hi - lo)              # 0..1, low to high
-        good = score if best_high else 1 - score     # 1 = good fixture
-        return good.map(lambda g: f"background-color: rgba({'46,160,67' if g >= 0.5 else '218,54,51'}, "
-                                  f"{abs(g - 0.5) * 1.2:.2f})")
 
-    text.columns = [f"GW{g}" for g in text.columns]
-    vals.columns = text.columns
-    text.insert(0, "Total", vals.sum(axis=1).round(2))
-    text.insert(0, "Mine", ["yes" if t in first else "" for t in text.index])
-    return text.style.apply(colour, axis=None, subset=list(vals.columns)).format({"Total": "{:.2f}"})
+PITCH_CAPTION = ("Card = club colour, opponent, xP. (C) captain with a bright border, (V) vice, [boost] = your "
+                 "boost applies, amber border with a % = FPL injury flag and chance of playing.")
 
 
 # ---------------------------------------------------------------- past gameweeks and auto-picks
