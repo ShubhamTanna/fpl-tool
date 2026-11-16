@@ -1,7 +1,6 @@
-pandas
-requests
-pyarrow
-pulp
-streamlit
-duckdb
-highspy
+highspy==1.16.0
+pandas==3.1.1
+PuLP==4.2.0
+pyarrow==26.0.1
+requests==2.34.2
+streamlit==1.67.0
