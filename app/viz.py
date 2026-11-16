@@ -35,6 +35,8 @@ pio.templates.default = "fpl"
 def chart(fig: go.Figure, caption: str, height: int = 360, key: str | None = None, select: bool = False):
     """Draw a figure in the shared style with its one-line 'what to look for' caption."""
     fig.update_layout(height=height)
+    if select:
+        fig.update_layout(clickmode="event+select", dragmode=False)   # a plain click selects the point
     out = st.plotly_chart(fig, theme=None, key=key, config={"displayModeBar": False},
                           **({"on_select": "rerun", "selection_mode": "points"} if select else {}))
     st.caption(caption)
