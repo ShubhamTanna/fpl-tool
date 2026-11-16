@@ -64,12 +64,15 @@ def build_events(boot: dict) -> pd.DataFrame:
     return df
 
 
-def build_player_history(player_ids: list[int], fixtures: pd.DataFrame,
-                         log_every: int = 50) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Returns (player_gw, player_seasons) from the element-summary endpoint."""
+def build_player_history(player_ids: list[int], fixtures: pd.DataFrame, log_every: int = 50,
+                         max_age_hours: float = 24.0, progress=None) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Returns (player_gw, player_seasons) from the element-summary endpoint.
+    progress: optional callback(done, total), called after every player."""
     rows, past = [], []
     for i, pid in enumerate(player_ids, 1):
-        summary = fpl_api.element_summary(pid)
+        summary = fpl_api.element_summary(pid, max_age_hours)
+        if progress:
+            progress(i, len(player_ids))
         rows.extend(summary["history"])
         past.extend({"player_id": pid, **h} for h in summary["history_past"])
         if i % log_every == 0:
@@ -89,12 +92,14 @@ def build_player_history(player_ids: list[int], fixtures: pd.DataFrame,
     return df, seasons
 
 
-def build_all() -> dict[str, pd.DataFrame]:
-    boot = fpl_api.bootstrap()
+def build_all(max_age_hours: float = 6.0, history_max_age_hours: float = 24.0,
+              progress=None) -> dict[str, pd.DataFrame]:
+    boot = fpl_api.bootstrap(max_age_hours)
     teams = build_teams(boot)
     players = build_players(boot, teams)
-    fixtures = build_fixtures(fpl_api.fixtures())
-    player_gw, player_seasons = build_player_history(players["player_id"].tolist(), fixtures)
+    fixtures = build_fixtures(fpl_api.fixtures(max_age_hours))
+    player_gw, player_seasons = build_player_history(
+        players["player_id"].tolist(), fixtures, max_age_hours=history_max_age_hours, progress=progress)
     tables = {"teams": teams, "players": players, "fixtures": fixtures, "events": build_events(boot),
               "player_gw": player_gw, "player_seasons": player_seasons}
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)

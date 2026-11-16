@@ -117,13 +117,16 @@ def pick_team(squad: list[int], proj: pd.DataFrame, players: pd.DataFrame, rules
 
 
 def plan_transfers(team: dict, proj: pd.DataFrame, players: pd.DataFrame, rules: Rules, gws: list[int],
-                   allow_transfers: bool = True, min_gain: float = MIN_GAIN) -> dict:
+                   allow_transfers: bool = True, min_gain: float = MIN_GAIN, lock: list[int] = (),
+                   ban: list[int] = (), max_transfers: int | None = None) -> dict:
     """Best transfers, XI and captain for each gameweek in `gws`, starting from `team`.
 
     team = {"squad": [ids], "bank": int, "free_transfers": int, "sell_price": {id: price}}
     Free transfers roll over (up to the cap); each transfer beyond them costs rules.hit_cost.
     min_gain: every transfer is charged this many xP inside the solver, so one is made only
     if it adds more than that. The charge is not part of the reported xP.
+    lock: players who must stay in the squad every gameweek. ban: players who may not be
+    bought. max_transfers: most transfers allowed in any one gameweek.
     """
     p = _pool(players, keep=team["squad"])
     ids, pos, club, cost = list(p.index), p.position.to_dict(), p.team.to_dict(), p.now_cost.to_dict()
@@ -142,10 +145,18 @@ def plan_transfers(team: dict, proj: pd.DataFrame, players: pd.DataFrame, rules:
             prob += x[i] == prev_x[i] + buy[i] - out[i]
             if not allow_transfers:
                 prob += buy[i] == 0
+        for i in lock:
+            if i in x:
+                prob += x[i] == 1
+        for i in ban:
+            if i in buy:
+                prob += buy[i] == 0
         _add_squad_rules(prob, x, ids, pos, club, rules)
         bank = prob.add_variable(f"bank_{gw}", lowBound=0)             # money can never go negative
         prob += bank == prev_bank + pulp.lpSum(sell[i] * out[i] for i in ids) - pulp.lpSum(cost[i] * buy[i] for i in ids)
         n = pulp.lpSum(buy.values())
+        if max_transfers is not None:
+            prob += n <= max_transfers
         hits = prob.add_variable(f"hits_{gw}", lowBound=0, cat="Integer")
         prob += hits >= n - ft                                         # transfers beyond the free ones
         ft_next = prob.add_variable(f"ft_{gw}", lowBound=1, upBound=rules.max_free_transfers)

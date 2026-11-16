@@ -90,3 +90,99 @@ def run_squad(horizon: int, budget: int):
     for g in res["gws"]:
         errs += check_lineup(g["xi"], g["bench"], g["captain"], g["vice"], g["squad"], players, r)
     return res, errs
+
+
+# ---------------------------------------------------------------- team, names, tables
+from fpl.config import team_id  # noqa: E402
+from fpl.ingest.team import load_team  # noqa: E402
+
+IST = "Asia/Kolkata"
+
+
+def next_gw() -> int:
+    return gameweeks()[0]
+
+
+def deadline_text() -> str:
+    ev = table("events")
+    d = ev.loc[ev.gw == next_gw(), "deadline_time"].iloc[0].tz_convert(IST)
+    return f"GW{next_gw()} deadline: {d:%a %d %b, %H:%M} IST"
+
+
+def data_stamp() -> float:
+    """Changes whenever the data or projections on disk change. Used as a cache key."""
+    return max((P / f"{n}.parquet").stat().st_mtime for n in ("players", "projections", "player_gw"))
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def my_team(stamp: float) -> dict:
+    """Shubham's team for the next gameweek, with transfers already made applied."""
+    r = rules()
+    return load_team(team_id(), table("players"), table("player_gw"), next_gw() - 1,
+                     r.sell_fee, r.max_free_transfers)
+
+
+def names() -> pd.Series:
+    """player_id -> display name."""
+    return table("players").set_index("player_id").web_name
+
+
+def labels() -> dict[int, str]:
+    """player_id -> 'Name (CLUB, POS, 5.5m)' for pickers."""
+    p = table("players")
+    return {i: f"{n} ({t}, {pos}, {c / 10:.1f}m)"
+            for i, n, t, pos, c in zip(p.player_id, names().reindex(p.player_id), p.team, p.position, p.now_cost)}
+
+
+def top1k() -> pd.Series:
+    """player_id -> % of the scanned top managers who own him (0 if nobody does)."""
+    return table("template").set_index("player_id").owned_pct
+
+
+def top1k_caption() -> str:
+    return (f"Top 1k % = share of the top {table('top_picks').entry.nunique():,} overall managers who owned "
+            "the player when the template was last scanned (scripts/build_template.py).")
+
+
+def breakdown(ids: list[int], gws: list[int], extra: dict | None = None) -> pd.DataFrame:
+    """One row per player: fixtures, expected minutes, xP and every part of it, summed over `gws`."""
+    d = proj()
+    d = d[d.gw.isin(gws) & d.player_id.isin(ids)]
+    agg = d.groupby("player_id").agg(opp=("opp", ", ".join), xmins=("xmins", "sum"), xp=("xp", "sum"),
+                                     **{c: (c, "sum") for c in PARTS}).reindex(ids)
+    p, own = table("players").set_index("player_id"), top1k()
+    out = pd.DataFrame({"Player": names().reindex(ids).values, "Pos": p.position[ids].values,
+                        "Club": p.team[ids].values, "Price": (p.now_cost[ids] / 10).values})
+    for k, v in (extra or {}).items():
+        out[k] = v
+    out["Fixtures"] = agg.opp.values
+    out["Top 1k %"] = own.reindex(ids).fillna(0).round(1).values
+    out["xMins"] = agg.xmins.round(0).values
+    out["xP"] = agg.xp.round(2).values
+    for c, label in PARTS.items():
+        out[label] = agg[c].round(2).values
+    return out
+
+
+def ticker_grid(value: str, best_high: bool, first: list[str] = ()):
+    """Club x gameweek grid, coloured green (good) to red. Clubs in `first` are listed on top."""
+    ticker = table("ticker")
+    vals = ticker.pivot(index="team", columns="gw", values=value)
+    text = ticker.assign(cell=ticker.opp + "  " + ticker[value].map("{:.2f}".format)).pivot(
+        index="team", columns="gw", values="cell")
+    order = vals.sum(axis=1).sort_values(ascending=not best_high).index
+    order = [t for t in order if t in first] + [t for t in order if t not in first]
+    vals, text = vals.loc[order], text.loc[order]
+    lo, hi = vals.values.min(), vals.values.max()
+
+    def colour(_):
+        score = (vals - lo) / (hi - lo)              # 0..1, low to high
+        good = score if best_high else 1 - score     # 1 = good fixture
+        return good.map(lambda g: f"background-color: rgba({'46,160,67' if g >= 0.5 else '218,54,51'}, "
+                                  f"{abs(g - 0.5) * 1.2:.2f})")
+
+    text.columns = [f"GW{g}" for g in text.columns]
+    vals.columns = text.columns
+    text.insert(0, "Total", vals.sum(axis=1).round(2))
+    text.insert(0, "Mine", ["yes" if t in first else "" for t in text.index])
+    return text.style.apply(colour, axis=None, subset=list(vals.columns)).format({"Total": "{:.2f}"})
