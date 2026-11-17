@@ -2,9 +2,11 @@
 from dataclasses import asdict
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 import common as c
+import viz
 from fpl.model.dials import DIALS
 from fpl.optimize.models import BENCH_GKP, BENCH_OUTFIELD, DECAY, FT_VALUE, MIN_GAIN
 
@@ -30,11 +32,43 @@ st.caption("Role: dials were chosen on the tune seasons, accepted on the hold-ou
            "budget), against the same pick made from points per game. Past injury flags are not available, so "
            "regular starters are over-projected in every replay.")
 
+fig = go.Figure()
+fig.add_bar(x=s.season, y=s.xi_ppg.round(1), name="Points-per-game XI", marker_color=viz.MUTED,
+            text=s.xi_ppg.round(1), textposition="outside")
+fig.add_bar(x=s.season, y=s.xi_model.round(1), name="Model XI", marker_color=viz.ACCENT,
+            text=s.xi_model.round(1), textposition="outside")
+fig.update_layout(barmode="group", title="Best XI: actual points per gameweek", yaxis_title="Points per gameweek",
+                  xaxis=dict(tickfont=dict(family=viz.SANS)))
+viz.chart(fig, "The gap between the bars is what the model's ranking is worth over simply picking on points per "
+               "game. It should be positive in every season, including the hold-out and the live one.", height=340, key="xi")
+
+st.subheader("Calibration by xP bucket")
+fig = go.Figure()
+kb = buck[buck.model == which]
+top = max(kb.mean_xp.max(), kb.mean_actual.max()) * 1.05
+fig.add_scatter(x=[0, top], y=[0, top], mode="lines", line=dict(color=viz.MUTED, dash="dot"), name="Perfect", hoverinfo="skip")
+for k, (season_name, d) in enumerate(kb.groupby("season", sort=False)):
+    fig.add_scatter(x=d.mean_xp.round(2), y=d.mean_actual.round(2), mode="lines+markers", name=season_name,
+                    marker=dict(size=(d.player_gws ** 0.5 / 6).clip(6, 22)),
+                    hovertemplate=season_name + ": projected %{x:.2f}, actual %{y:.2f}<extra></extra>")
+fig.update_layout(title="Average projected against average actual points, by xP bucket",
+                  xaxis_title="Average xP in the bucket", yaxis_title="Average actual points")
+viz.chart(fig, "Points on the dotted line = players projected X points averaged X. Below the line the model is "
+               "too generous, above it too cautious. Bigger markers hold more player-gameweeks; the top bucket "
+               "is small and noisy.", height=420, key="calib")
+
 st.subheader("Calibration by part of the score")
 season = st.selectbox("Season", list(s.season), index=len(s) - 1)
+k = comp[(comp.model == which) & (comp.season == season)]
+fig = go.Figure()
+fig.add_bar(x=k.part, y=k.actual.round(0), name="Actual", marker_color=viz.MUTED)
+fig.add_bar(x=k.part, y=k.projected.round(0), name="Projected", marker_color=viz.ACCENT)
+fig.update_layout(barmode="group", title=f"Projected against actual points by part, {season}", yaxis_title="Points",
+                  xaxis=dict(tickfont=dict(family=viz.SANS)))
+viz.chart(fig, "Each pair should be level. A blue bar taller than the grey one means that part is over-projected; "
+               "the ratio is in the table below.", height=340, key="parts")
 a, b = st.columns(2)
 with a:
-    k = comp[(comp.model == which) & (comp.season == season)]
     c.show(k[["part", "projected", "actual", "ratio"]].rename(columns={
         "part": "Part", "projected": "Projected pts", "actual": "Actual pts", "ratio": "Projected / actual"}).round(2))
     st.caption("1.00 = projected exactly what was scored. Defensive contribution did not exist before 2025-26.")

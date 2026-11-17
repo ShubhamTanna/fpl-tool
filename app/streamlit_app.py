@@ -21,6 +21,7 @@ pages = [
     st.Page("app_pages/player.py", title="Player", url_path="player"),
     st.Page("app_pages/boosts.py", title="Boosts", url_path="boosts"),
     st.Page("app_pages/scout.py", title="Scout", url_path="scout"),
+    st.Page("app_pages/clubs.py", title="Clubs", url_path="clubs"),
     st.Page("app_pages/projections.py", title="Projections", url_path="projections"),
     st.Page("app_pages/model_lab.py", title="Model lab", url_path="model-lab"),
 ]

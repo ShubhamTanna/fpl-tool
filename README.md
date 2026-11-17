@@ -18,7 +18,7 @@ From the project root:
 .venv/bin/streamlit run app/streamlit_app.py
 ```
 
-Pages: My team, Drafts, Player, Boosts, Scout, Projections, Model lab. The Refresh data button on My team
+Pages: My team, Drafts, Player, Boosts, Scout, Clubs, Projections, Model lab. The Refresh data button on My team
 fetches new FPL data and rebuilds the projections. Drafts and boosts are stored in `data/user/` (not committed);
 use the export button on Drafts or Boosts for a backup.
 

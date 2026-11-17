@@ -226,7 +226,8 @@ Pages (`app/app_pages/`), shared helpers in `app/common.py`:
 - **Player**: match log, per-90 rates, past seasons, xP by gameweek with its inputs, set pieces, ownership and price trend, record against upcoming opponents (display only), compare mode for 2 to 4 players.
 - **Boosts**: output (multiplies goal and assist points) and minutes (replaces chance of starting), in `data/user/boosts.json`. They feed `project(boosts=...)`, so every page uses them; boosted players are marked `[boost]`. Never deleted: cancelling cuts the end gameweek and stamps it. Ended boosts are scored: xP without, xP with, actual.
 - **Scout**: xG underperformers, minutes rising, xP per million, fixture swing. Rules and thresholds are printed on the page and live in `src/fpl/insights/signals.py` and `scout.py`. None is backtested.
-- **Projections**: the full table with every part.
+- **Clubs**: attack against defence ratings, rolling xG for and against, each club's players by xP, defensive actions opponents record against it (display only).
+- **Projections**: top 20 per position by part, and the full table.
 - **Model lab**: backtest summary, calibration, trial log, dials, threshold backtest. Read-only.
 
 The old Template, Signals, Fixtures and Squad builder pages are gone: ownership is a column, tickers are on My team, signals are in Scout, the squad builder is a way to start a draft.
@@ -266,15 +267,23 @@ Decisions Shubham has made (do not re-ask):
 - Section 5 deploy is cancelled. The app is local only.
 - Step 7 is built in one run, sections A to H, without stopping for approval between sections.
 
-### Theme (Step 7A)
+### Interface direction (Step 8, 17 Nov 2026) - replaces the shubhamtanna.in look
 
-Taken from shubhamtanna.in on 17 Nov 2026: paper `#e8e7e2`, panel `#dfded8`, ink `#121211`, muted `#5d5b56`, rule `#c7c5bd`, accent red `#ff0000` (accent text `#c8141a`); Playfair Display 900 headings, Newsreader body, JetBrains Mono labels; square corners; tabular figures. Set in `.streamlit/config.toml`, plus four CSS rules in `app/common.py`.
+The shubhamtanna.in look is dropped. The app is dark, football-analytics, colourful and number-first.
+- **Theme** (`.streamlit/config.toml`, `app/viz.py`): near-black background `#0B0F14`, panels `#151B23`, text `#E6EDF3`, one accent (cyan `#22D3EE`), green `#2ECC71` / red `#FF4D4F` for good / bad. Sans-serif everywhere (Roboto, chosen because its digits are equal-width), JetBrains Mono for metrics, labels and chart numbers. No serif fonts, no emojis.
+- **Charts**: all Plotly, through one shared template (`viz.py`, template "fpl") and `viz.chart()`, which requires a one-line caption saying what to look for. No decorative charts.
+- **Club colours**: `data/manual/club_colours.csv` (hand-entered, 20 clubs) read by `src/fpl/colours.py`. No crests or logos (trademarks, public repo): a club is a colour chip with its three-letter code. A dark club colour gets a light outline on chips and pitch cards; in chart series it is lightened until it has 3:1 contrast, which keeps the hue (falling back to the secondary colour would have turned five clubs white). `tests/test_colours.py` checks 20 clubs, valid hex and contrast.
+- **Pitch view**: `viz.pitch()` with `common.cards()`. Used on My team (one per planned gameweek) and Drafts (draft and real team side by side).
+- **Tables**: `common.show()` / `viz.style()` add club chips, position tags, colour scales, in-cell bars for xP and consistent decimals (1 in summaries, 2 in breakdowns).
+- **Pages**: My team, Drafts, Player, Boosts, Scout, Clubs (new), Projections, Model lab. `/my-team` opens directly; the root URL forwards to it.
+- **Drafts are scored like for like**: "My team, same method" scores the real squad the way drafts are scored (auto-picked XI from the projection made beforehand, captain doubled, no automatic substitutions, chips or hits). The official score is shown beside it. A draft given a start gameweek that was already played is labelled "uses hindsight".
+- **Scout**: clicking a chart point or a table row opens the Player page; there is no separate button. Thresholds accepted as they are.
+- **Refresh** has an optional "Also re-scan top 1,000" tick box.
 
-Could not be matched in Streamlit:
-- Table headers. The site uses 11px uppercase mono headers and right-aligned ruled rows. Streamlit draws tables on a canvas, which takes colours and the body font from the theme but no header styling.
-- The site's 18px body and very large display headings. The app uses 16px and smaller headings to stay data-dense.
-- The dark "night" bands and the hero imagery. Not used.
-- Fonts load from Google Fonts, so they need an internet connection; offline the app falls back to system serif fonts.
+Could not be done in Streamlit:
+- A second font inside tables. Tables are drawn on a canvas with the app's one body font, so table numbers are Roboto (equal-width digits), not JetBrains Mono.
+- Outlines or rounded chips inside table cells. A table chip is a filled cell, so dark clubs use their lightened colour there.
+- Number bars and colour scales in the same cell: xP columns get bars, other key columns get colour scales.
 
 ## Shubham's methods (encode as signals, test later)
 

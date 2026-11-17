@@ -82,7 +82,7 @@ def stacked_parts(parts: pd.DataFrame, labels: list[str], horizontal: bool = Tru
 
 
 # ---------------------------------------------------------------- tables
-DIVERGING = ("change", "minus", "- mine", "running", "swing", "error", "rise", "gain", "diff")
+DIVERGING = ("change", "minus", "- mine", "running", "swing", "error", "rise", "diff")
 NO_FORMAT = {"GW", "Id", "From GW", "To GW"}
 HEAT_DEFAULT = ["Appearance", "Goals", "Assists", "Clean sheet", "Conceded", "Saves", "Def. contribution", "Bonus",
                 "Cards", "Top 1k %", "Owned %", "xP per m", "Chance of starting", "xMins", "Pts", "Pts per match"]
